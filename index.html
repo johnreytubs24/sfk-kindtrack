@@ -202,7 +202,18 @@
         <h2>📅 Daily Attendance</h2>
         <p>Encode and review attendance for the selected date.</p>
       </div>
-      <div class="attendance-list-actions">
+      <div class="attendance-list-actions attendance-header-actions">
+        <button
+          id="toggleMonthlyAttendanceSummaryBtn"
+          class="monthly-summary-icon-btn"
+          type="button"
+          aria-controls="monthlyAttendancePanel"
+          aria-expanded="false"
+          title="Monthly Attendance Summary"
+        >
+          <span aria-hidden="true">📊</span>
+          <span class="monthly-summary-icon-label">Monthly</span>
+        </button>
         <button id="todayAttendanceBtn" class="summary-btn" type="button">
           Today
         </button>
@@ -216,6 +227,31 @@
       <input type="date" id="attendanceDate" />
     </label>
   </div>
+
+  <section
+    class="monthly-attendance monthly-attendance-panel hidden"
+    id="monthlyAttendancePanel"
+    aria-hidden="true"
+  >
+    <div class="attendance-board-header monthly-attendance-panel-header">
+      <div>
+        <strong>Monthly Attendance Summary</strong>
+        <span>Counts per student for the selected month.</span>
+      </div>
+      <div class="monthly-attendance-actions">
+        <input type="month" id="attendanceMonth" aria-label="Attendance month" />
+        <button id="downloadMonthlyAttendanceBtn" class="print-btn" type="button">
+          ⬇ Download Spreadsheet
+        </button>
+        <button id="printMonthlyAttendanceBtn" class="print-btn" type="button">
+          🖨 Download PDF
+        </button>
+      </div>
+    </div>
+    <div id="monthlyAttendanceList" class="monthly-attendance-list">
+      <p class="empty-message">No monthly attendance yet.</p>
+    </div>
+  </section>
 
   <p class="viewer-attendance-note">
     View Only Mode shows the daily attendance summary and board only.
@@ -318,26 +354,6 @@
     <p id="attendanceMessage" class="empty-message hidden"></p>
   </div>
 
-  <details class="monthly-attendance">
-    <summary>Monthly Attendance Summary</summary>
-    <div class="attendance-board-header">
-      <div>
-        <span>Counts per student for the selected month.</span>
-      </div>
-      <div class="monthly-attendance-actions">
-        <input type="month" id="attendanceMonth" />
-        <button id="downloadMonthlyAttendanceBtn" class="print-btn" type="button">
-          ⬇ Download Spreadsheet
-        </button>
-        <button id="printMonthlyAttendanceBtn" class="print-btn" type="button">
-          🖨 Print Monthly
-        </button>
-      </div>
-    </div>
-    <div id="monthlyAttendanceList" class="monthly-attendance-list">
-      <p class="empty-message">No monthly attendance yet.</p>
-    </div>
-  </details>
   </div>
 </div>
 

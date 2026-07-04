@@ -1,19 +1,17 @@
-const CACHE_NAME = 'sfk-kindtrack-direct-firestore-save-v4';
+const CACHE_NAME = 'sfk-kindtrack-clean-final-v12';
 const APP_SHELL = [
   './',
   './index.html',
   './handbook.html',
   './style.css',
+  './script.js',
   './firebase-config.js',
   './firebase-auth-optional.js',
-  './firebase-auth-gate.js',
   './firebase-adapter.js',
-  './firebase-import.html',
-  './FIRESTORE_RULES_SIGNED_IN.txt',
-  './script.js',
   './manifest.json',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './attendance-header.png'
 ];
 
 self.addEventListener('install', (event) => {
