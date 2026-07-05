@@ -157,6 +157,7 @@ const saveAttendanceBtn = document.getElementById("saveAttendanceBtn");
 const printAttendanceBtn = document.getElementById("printAttendanceBtn");
 const printMonthlyAttendanceBtn = document.getElementById("printMonthlyAttendanceBtn");
 const downloadMonthlyAttendanceBtn = document.getElementById("downloadMonthlyAttendanceBtn");
+const downloadSf2AttendanceBtn = document.getElementById("downloadSf2AttendanceBtn");
 const toggleMonthlyAttendanceSummaryBtn = document.getElementById("toggleMonthlyAttendanceSummaryBtn");
 const monthlyAttendancePanel = document.getElementById("monthlyAttendancePanel");
 const todayAttendanceBtn = document.getElementById("todayAttendanceBtn");
@@ -2289,6 +2290,462 @@ async function downloadMonthlyAttendanceSpreadsheet() {
   URL.revokeObjectURL(url);
 
   showToast("Monthly attendance spreadsheet downloaded.");
+}
+
+const SF2_TEMPLATE_FILE = "sf2-template.xlsx";
+const SF2_MONTH_SHEET_NAMES = {
+  "06": "SF2_JUNE",
+  "07": "SF2_JUL",
+  "08": "SF2_AUG",
+  "09": "SF2_SEPT",
+  "10": "SF2_OCT",
+  "11": "SF2_NOV",
+  "12": "SF2_DEC",
+  "01": "SF2_JAN",
+  "02": "SF2_FEB",
+  "03": "SF2_MAR",
+  "04": "SF2_APR",
+  "05": "SF2_MAY"
+};
+const SF2_STUDENT_ROW_RANGES = [
+  { start: 12, end: 61 },
+  { start: 64, end: 113 }
+];
+
+function readUint16LE(bytes, offset) {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readUint32LE(bytes, offset) {
+  return (
+    bytes[offset] |
+    (bytes[offset + 1] << 8) |
+    (bytes[offset + 2] << 16) |
+    (bytes[offset + 3] << 24)
+  ) >>> 0;
+}
+
+function readStoredZipEntries(bytes) {
+  const decoder = new TextDecoder();
+  const entries = [];
+  let offset = 0;
+
+  while (offset + 30 <= bytes.length) {
+    const signature = readUint32LE(bytes, offset);
+
+    if (signature === 0x02014b50 || signature === 0x06054b50) break;
+    if (signature !== 0x04034b50) break;
+
+    const compressionMethod = readUint16LE(bytes, offset + 8);
+    const compressedSize = readUint32LE(bytes, offset + 18);
+    const uncompressedSize = readUint32LE(bytes, offset + 22);
+    const fileNameLength = readUint16LE(bytes, offset + 26);
+    const extraLength = readUint16LE(bytes, offset + 28);
+    const nameStart = offset + 30;
+    const nameEnd = nameStart + fileNameLength;
+    const dataStart = nameEnd + extraLength;
+    const dataEnd = dataStart + compressedSize;
+
+    if (compressionMethod !== 0) {
+      throw new Error("The SF2 template must be stored without ZIP compression.");
+    }
+
+    if (dataEnd > bytes.length || compressedSize !== uncompressedSize) {
+      throw new Error("The SF2 template could not be read safely.");
+    }
+
+    entries.push({
+      name: decoder.decode(bytes.slice(nameStart, nameEnd)),
+      data: bytes.slice(dataStart, dataEnd)
+    });
+
+    offset = dataEnd;
+  }
+
+  if (!entries.length) {
+    throw new Error("The SF2 template is empty or unreadable.");
+  }
+
+  return entries;
+}
+
+function zipEntryToText(entry) {
+  return new TextDecoder().decode(entry.data);
+}
+
+function updateZipEntry(entries, name, data) {
+  const entry = entries.find(item => item.name === name);
+
+  if (!entry) {
+    throw new Error(`${name} was not found in the SF2 template.`);
+  }
+
+  entry.data = data;
+}
+
+function getZipEntry(entries, name) {
+  const entry = entries.find(item => item.name === name);
+
+  if (!entry) {
+    throw new Error(`${name} was not found in the SF2 template.`);
+  }
+
+  return entry;
+}
+
+function decodeXML(value) {
+  return String(value || "")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+function getXmlAttribute(source, name) {
+  const pattern = new RegExp(`${name}="([^"]*)"`);
+  const match = String(source || "").match(pattern);
+  return match ? decodeXML(match[1]) : "";
+}
+
+function getSf2SharedStrings(entries) {
+  const entry = entries.find(item => item.name === "xl/sharedStrings.xml");
+  if (!entry) return [];
+
+  const xml = zipEntryToText(entry);
+  const strings = [];
+  const siPattern = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let siMatch;
+
+  while ((siMatch = siPattern.exec(xml))) {
+    const textParts = [];
+    const textPattern = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let textMatch;
+
+    while ((textMatch = textPattern.exec(siMatch[1]))) {
+      textParts.push(decodeXML(textMatch[1]));
+    }
+
+    strings.push(textParts.join(""));
+  }
+
+  return strings;
+}
+
+function getCellValueFromXml(cellXml, sharedStrings) {
+  if (!cellXml) return "";
+
+  const type = getXmlAttribute(cellXml, "t");
+
+  if (type === "inlineStr") {
+    const textParts = [];
+    const textPattern = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let textMatch;
+
+    while ((textMatch = textPattern.exec(cellXml))) {
+      textParts.push(decodeXML(textMatch[1]));
+    }
+
+    return textParts.join("");
+  }
+
+  const valueMatch = cellXml.match(/<v>([\s\S]*?)<\/v>/);
+  if (!valueMatch) return "";
+
+  if (type === "s") {
+    return sharedStrings[Number(valueMatch[1])] || "";
+  }
+
+  return decodeXML(valueMatch[1]);
+}
+
+function extractSf2SheetCells(sheetXml, sharedStrings) {
+  const cells = [];
+  const cellPattern = /<c\b[^>]*?\br="([A-Z]+)(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g;
+  let match;
+
+  while ((match = cellPattern.exec(sheetXml))) {
+    cells.push({
+      ref: `${match[1]}${match[2]}`,
+      col: match[1],
+      row: Number(match[2]),
+      value: getCellValueFromXml(match[0], sharedStrings)
+    });
+  }
+
+  return cells;
+}
+
+function normalizeSf2Name(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function compactSf2Name(value) {
+  return normalizeSf2Name(value).replace(/\s+/g, "");
+}
+
+function getSf2StudentCandidates(student) {
+  const candidates = [
+    student && student.name,
+    `${student && student.lastName ? student.lastName : ""} ${student && student.firstName ? student.firstName : ""}`,
+    `${student && student.lastName ? student.lastName : ""}, ${student && student.firstName ? student.firstName : ""}`,
+    `${student && student.firstName ? student.firstName : ""} ${student && student.lastName ? student.lastName : ""}`
+  ];
+
+  return [...new Set(candidates.map(compactSf2Name).filter(value => value.length >= 4))];
+}
+
+function getSf2StudentMatchScore(templateName, student) {
+  const compactTemplate = compactSf2Name(templateName);
+  const lastName = compactSf2Name(student && student.lastName);
+  const firstName = compactSf2Name(student && student.firstName);
+  let score = 0;
+
+  getSf2StudentCandidates(student).forEach(candidate => {
+    if (compactTemplate === candidate) {
+      score = Math.max(score, 10000);
+    } else if (compactTemplate.includes(candidate)) {
+      score = Math.max(score, candidate.length + 500);
+    } else if (candidate.includes(compactTemplate)) {
+      score = Math.max(score, compactTemplate.length + 250);
+    }
+  });
+
+  if (lastName && firstName && compactTemplate.includes(lastName) && compactTemplate.includes(firstName)) {
+    score = Math.max(score, lastName.length + firstName.length + 1000);
+  }
+
+  return score;
+}
+
+function matchSf2Student(templateName, availableStudents) {
+  let bestStudent = null;
+  let bestScore = 0;
+  let tie = false;
+
+  availableStudents.forEach(student => {
+    const score = getSf2StudentMatchScore(templateName, student);
+
+    if (score > bestScore) {
+      bestStudent = student;
+      bestScore = score;
+      tie = false;
+    } else if (score > 0 && score === bestScore) {
+      tie = true;
+    }
+  });
+
+  return bestScore > 0 && !tie ? bestStudent : null;
+}
+
+function getSf2SheetPathForMonth(entries, monthValue) {
+  const monthPart = String(monthValue || "").slice(5, 7);
+  const targetSheetName = SF2_MONTH_SHEET_NAMES[monthPart];
+
+  if (!targetSheetName) {
+    throw new Error("No SF2 sheet is configured for the selected month.");
+  }
+
+  const workbookXml = zipEntryToText(getZipEntry(entries, "xl/workbook.xml"));
+  const relsXml = zipEntryToText(getZipEntry(entries, "xl/_rels/workbook.xml.rels"));
+  const sheetPattern = /<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/>/g;
+  let sheetMatch;
+  let relationshipId = "";
+
+  while ((sheetMatch = sheetPattern.exec(workbookXml))) {
+    if (decodeXML(sheetMatch[1]) === targetSheetName) {
+      relationshipId = sheetMatch[2];
+      break;
+    }
+  }
+
+  if (!relationshipId) {
+    throw new Error(`${targetSheetName} was not found in the SF2 template.`);
+  }
+
+  const relPattern = new RegExp(`<Relationship\\b(?=[^>]*Id="${relationshipId}")[^>]*Target="([^"]+)"[^>]*/>`);
+  const relMatch = relsXml.match(relPattern);
+
+  if (!relMatch) {
+    throw new Error(`${targetSheetName} could not be connected to a worksheet file.`);
+  }
+
+  const target = relMatch[1];
+  return target.startsWith("xl/") ? target : `xl/${target.replace(/^\.\.\//, "")}`;
+}
+
+function getSf2DateColumns(cells) {
+  const columnsByDay = {};
+
+  cells
+    .filter(cell => cell.row === 10)
+    .forEach(cell => {
+      const day = Number(cell.value);
+      if (Number.isInteger(day) && day >= 1 && day <= 31) {
+        columnsByDay[day] = cell.col;
+      }
+    });
+
+  return columnsByDay;
+}
+
+function isSf2StudentName(value) {
+  const normalized = normalizeSf2Name(value);
+  return /[A-Z]/.test(normalized) && normalized !== "FOOTER" && normalized !== "0";
+}
+
+function getSf2StudentRows(cells) {
+  return cells
+    .filter(cell => cell.col === "C" && isSf2StudentName(cell.value))
+    .filter(cell => SF2_STUDENT_ROW_RANGES.some(range => cell.row >= range.start && cell.row <= range.end))
+    .map(cell => ({ row: cell.row, name: cell.value }));
+}
+
+function setSf2CellText(sheetXml, ref, value) {
+  const cellPattern = new RegExp(`<c\\b(?=[^>]*\\br="${ref}")([^>]*)\\/>|<c\\b(?=[^>]*\\br="${ref}")([^>]*)>[\\s\\S]*?<\\/c>`);
+  const match = sheetXml.match(cellPattern);
+
+  if (!match) return sheetXml;
+
+  const rawAttributes = match[1] || match[2] || "";
+  const cleanAttributes = rawAttributes
+    .replace(/\s+t="[^"]*"/g, "")
+    .replace(/\s+cm="[^"]*"/g, "")
+    .replace(/\s+ph="[^"]*"/g, "");
+  const replacement = value
+    ? `<c${cleanAttributes} t="inlineStr"><is><t>${escapeXML(value)}</t></is></c>`
+    : `<c${cleanAttributes}/>`;
+
+  return sheetXml.replace(cellPattern, replacement);
+}
+
+function clearSf2AttendanceMarks(sheetXml, studentRows, dateColumns) {
+  let updatedXml = sheetXml;
+  const uniqueColumns = [...new Set(Object.values(dateColumns))];
+
+  studentRows.forEach(row => {
+    uniqueColumns.forEach(col => {
+      updatedXml = setSf2CellText(updatedXml, `${col}${row.row}`, "");
+    });
+  });
+
+  return updatedXml;
+}
+
+function removeSf2CalcChain(entries) {
+  const filteredEntries = entries.filter(entry => entry.name !== "xl/calcChain.xml");
+
+  const relsEntry = filteredEntries.find(entry => entry.name === "xl/_rels/workbook.xml.rels");
+  if (relsEntry) {
+    const relsXml = zipEntryToText(relsEntry).replace(/<Relationship\b(?=[^>]*Target="calcChain\.xml")[^>]*\/>/g, "");
+    relsEntry.data = relsXml;
+  }
+
+  const contentTypesEntry = filteredEntries.find(entry => entry.name === "[Content_Types].xml");
+  if (contentTypesEntry) {
+    const contentTypesXml = zipEntryToText(contentTypesEntry).replace(/<Override\b(?=[^>]*PartName="\/xl\/calcChain\.xml")[^>]*\/>/g, "");
+    contentTypesEntry.data = contentTypesXml;
+  }
+
+  const workbookEntry = filteredEntries.find(entry => entry.name === "xl/workbook.xml");
+  if (workbookEntry) {
+    let workbookXml = zipEntryToText(workbookEntry);
+    const calcPr = '<calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>';
+
+    if (/<calcPr\b[\s\S]*?(?:<\/calcPr>|\/>)/.test(workbookXml)) {
+      workbookXml = workbookXml.replace(/<calcPr\b[\s\S]*?(?:<\/calcPr>|\/>)/, calcPr);
+    } else {
+      workbookXml = workbookXml.replace("</workbook>", `${calcPr}</workbook>`);
+    }
+
+    workbookEntry.data = workbookXml;
+  }
+
+  return filteredEntries;
+}
+
+async function buildSf2AttendanceWorkbookBlob(monthValue) {
+  const response = await fetch(new URL(SF2_TEMPLATE_FILE, window.location.href));
+
+  if (!response.ok) {
+    throw new Error(`SF2 template request failed: ${response.status}`);
+  }
+
+  const templateBytes = new Uint8Array(await response.arrayBuffer());
+  const entries = readStoredZipEntries(templateBytes);
+  const sharedStrings = getSf2SharedStrings(entries);
+  const sheetPath = getSf2SheetPathForMonth(entries, monthValue);
+  const sheetEntry = getZipEntry(entries, sheetPath);
+  let sheetXml = zipEntryToText(sheetEntry);
+  const cells = extractSf2SheetCells(sheetXml, sharedStrings);
+  const dateColumns = getSf2DateColumns(cells);
+  const studentRows = getSf2StudentRows(cells);
+  const availableStudents = [...students];
+  const dateInfos = Object.entries(dateColumns).map(([day, col]) => ({
+    day: Number(day),
+    col,
+    dateValue: `${monthValue}-${String(day).padStart(2, "0")}`
+  }));
+  let markCount = 0;
+  let matchedCount = 0;
+
+  sheetXml = clearSf2AttendanceMarks(sheetXml, studentRows, dateColumns);
+
+  studentRows.forEach(sf2Row => {
+    const student = matchSf2Student(sf2Row.name, availableStudents);
+
+    if (!student) return;
+    matchedCount += 1;
+
+    dateInfos.forEach(dateInfo => {
+      const mark = getAttendancePrintMark(student.id, dateInfo.dateValue);
+
+      if (mark === "X" || mark === "T") {
+        sheetXml = setSf2CellText(sheetXml, `${dateInfo.col}${sf2Row.row}`, mark);
+        markCount += 1;
+      }
+    });
+  });
+
+  updateZipEntry(entries, sheetPath, sheetXml);
+
+  const updatedEntries = removeSf2CalcChain(entries);
+  const blob = buildZip(updatedEntries);
+  blob.sf2MatchedCount = matchedCount;
+  blob.sf2MarkCount = markCount;
+  blob.sf2StudentRowCount = studentRows.length;
+
+  return blob;
+}
+
+async function downloadSf2AttendanceSpreadsheet() {
+  ensureAttendanceDefaults();
+
+  if (!students.length) {
+    showToast("No students loaded yet.");
+    return;
+  }
+
+  const monthValue = attendanceMonth ? attendanceMonth.value : getCurrentMonthISO();
+  const monthLabel = getMonthFileLabel(monthValue);
+  const workbookBlob = await buildSf2AttendanceWorkbookBlob(monthValue);
+  const url = URL.createObjectURL(workbookBlob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = `SF2-${monthLabel.replace(/[^a-z0-9]+/gi, "-").toUpperCase()}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+
+  showToast(`SF2 Excel downloaded. ${workbookBlob.sf2MarkCount || 0} X/T marks placed.`);
 }
 
 function buildOfficialAttendanceGroup(group, dateValues, minimumRows, showLabel = true) {
@@ -5857,6 +6314,15 @@ if (downloadMonthlyAttendanceBtn) {
     downloadMonthlyAttendanceSpreadsheet().catch(error => {
       console.error("Monthly spreadsheet download error:", error);
       showToast("Unable to download monthly spreadsheet.");
+    });
+  });
+}
+
+if (downloadSf2AttendanceBtn) {
+  downloadSf2AttendanceBtn.addEventListener("click", () => {
+    downloadSf2AttendanceSpreadsheet().catch(error => {
+      console.error("SF2 spreadsheet download error:", error);
+      showToast("Unable to download SF2 Excel.");
     });
   });
 }

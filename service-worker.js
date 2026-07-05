@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sfk-kindtrack-clean-final-v12';
+const CACHE_NAME = 'sfk-kindtrack-sf2-export-v13';
 const APP_SHELL = [
   './',
   './index.html',
@@ -11,7 +11,8 @@ const APP_SHELL = [
   './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './attendance-header.png'
+  './attendance-header.png',
+  './sf2-template.xlsx'
 ];
 
 self.addEventListener('install', (event) => {
