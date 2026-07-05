@@ -2544,10 +2544,17 @@ function matchSf2Student(templateName, availableStudents) {
   return bestScore > 0 && !tie ? bestStudent : null;
 }
 
-function getSf2SheetPathByName(entries, targetSheetName) {
+function getSf2SheetPathForMonth(entries, monthValue) {
+  const monthPart = String(monthValue || "").slice(5, 7);
+  const targetSheetName = SF2_MONTH_SHEET_NAMES[monthPart];
+
+  if (!targetSheetName) {
+    throw new Error("No SF2 sheet is configured for the selected month.");
+  }
+
   const workbookXml = zipEntryToText(getZipEntry(entries, "xl/workbook.xml"));
   const relsXml = zipEntryToText(getZipEntry(entries, "xl/_rels/workbook.xml.rels"));
-  const sheetPattern = /<sheet[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/>/g;
+  const sheetPattern = /<sheet\b[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"[^>]*\/>/g;
   let sheetMatch;
   let relationshipId = "";
 
@@ -2562,7 +2569,7 @@ function getSf2SheetPathByName(entries, targetSheetName) {
     throw new Error(`${targetSheetName} was not found in the SF2 template.`);
   }
 
-  const relPattern = new RegExp(`<Relationship\b(?=[^>]*Id="${relationshipId}")[^>]*Target="([^"]+)"[^>]*/>`);
+  const relPattern = new RegExp(`<Relationship\\b(?=[^>]*Id="${relationshipId}")[^>]*Target="([^"]+)"[^>]*/>`);
   const relMatch = relsXml.match(relPattern);
 
   if (!relMatch) {
@@ -2571,28 +2578,6 @@ function getSf2SheetPathByName(entries, targetSheetName) {
 
   const target = relMatch[1];
   return target.startsWith("xl/") ? target : `xl/${target.replace(/^\.\.\//, "")}`;
-}
-
-function getSf2SheetPathForMonth(entries, monthValue) {
-  const monthPart = String(monthValue || "").slice(5, 7);
-  const targetSheetName = SF2_MONTH_SHEET_NAMES[monthPart];
-
-  if (!targetSheetName) {
-    throw new Error("No SF2 sheet is configured for the selected month.");
-  }
-
-  return getSf2SheetPathByName(entries, targetSheetName);
-}
-
-function prepareAllSf2MonthSheets(entries, sharedStrings) {
-  Object.values(SF2_MONTH_SHEET_NAMES).forEach(sheetName => {
-    const sheetPath = getSf2SheetPathByName(entries, sheetName);
-    const sheetEntry = getZipEntry(entries, sheetPath);
-    const sheetXml = zipEntryToText(sheetEntry);
-    const cells = extractSf2SheetCells(sheetXml, sharedStrings);
-
-    sheetEntry.data = prepareSf2SheetLayout(sheetXml, cells);
-  });
 }
 
 function getSf2DateColumns(cells) {
@@ -2620,85 +2605,6 @@ function getSf2StudentRows(cells) {
     .filter(cell => cell.col === "C" && isSf2StudentName(cell.value))
     .filter(cell => SF2_STUDENT_ROW_RANGES.some(range => cell.row >= range.start && cell.row <= range.end))
     .map(cell => ({ row: cell.row, name: cell.value }));
-}
-
-function getSf2StudentSlotRows(cells) {
-  const nameByRow = new Map(
-    cells
-      .filter(cell => cell.col === "C")
-      .map(cell => [cell.row, cell.value])
-  );
-  const rows = [];
-
-  SF2_STUDENT_ROW_RANGES.forEach(range => {
-    for (let row = range.start; row <= range.end; row += 1) {
-      rows.push({
-        row,
-        name: nameByRow.has(row) ? nameByRow.get(row) : ""
-      });
-    }
-  });
-
-  return rows;
-}
-
-function shouldHideSf2StudentSlot(slotRow) {
-  const normalized = normalizeSf2Name(slotRow && slotRow.name);
-
-  return !normalized || normalized === "0" || normalized === "FOOTER";
-}
-
-function setSf2RowHidden(sheetXml, rowNumber, isHidden) {
-  const rowPattern = new RegExp(`<row\b(?=[^>]*\br="${rowNumber}")[^>]*>`);
-
-  return sheetXml.replace(rowPattern, rowTag => {
-    let updatedTag = rowTag
-      .replace(/\s+hidden="[^"]*"/g, "")
-      .replace(/\s+collapsed="[^"]*"/g, "");
-
-    if (isHidden) {
-      updatedTag = updatedTag.replace(/>$/, ' hidden="1">');
-    }
-
-    return updatedTag;
-  });
-}
-
-function setSf2CellStyle(sheetXml, ref, style) {
-  const cellPattern = new RegExp(`<c\b(?=[^>]*\br="${ref}")([^>]*)\/>|<c\b(?=[^>]*\br="${ref}")([^>]*)>([\s\S]*?)<\/c>`);
-  const match = sheetXml.match(cellPattern);
-
-  if (match) {
-    const attributes = (match[1] || match[2] || "")
-      .replace(/\s+s="[^"]*"/g, "")
-      .replace(/\s+$/, "");
-    const updatedAttributes = `${attributes} s="${style}"`;
-
-    if (match[3] !== undefined) {
-      return sheetXml.replace(cellPattern, `<c${updatedAttributes}>${match[3]}</c>`);
-    }
-
-    return sheetXml.replace(cellPattern, `<c${updatedAttributes}/>`);
-  }
-
-  const rowNumber = Number(String(ref).replace(/^[A-Z]+/, ""));
-  const rowPattern = new RegExp(`(<row\b(?=[^>]*\br="${rowNumber}")[^>]*>)([\s\S]*?)(<\/row>)`);
-
-  return sheetXml.replace(rowPattern, `$1<c r="${ref}" s="${style}"/>$2$3`);
-}
-
-function prepareSf2SheetLayout(sheetXml, cells) {
-  let updatedXml = sheetXml;
-
-  getSf2StudentSlotRows(cells).forEach(slotRow => {
-    updatedXml = setSf2RowHidden(updatedXml, slotRow.row, shouldHideSf2StudentSlot(slotRow));
-  });
-
-  // Add blank cells beside the ID NUMBER header area so the left/right borders stay closed.
-  updatedXml = setSf2CellStyle(updatedXml, "A10", "258");
-  updatedXml = setSf2CellStyle(updatedXml, "A11", "259");
-
-  return updatedXml;
 }
 
 function setSf2CellText(sheetXml, ref, value) {
@@ -2774,11 +2680,6 @@ async function buildSf2AttendanceWorkbookBlob(monthValue) {
   const templateBytes = new Uint8Array(await response.arrayBuffer());
   const entries = readStoredZipEntries(templateBytes);
   const sharedStrings = getSf2SharedStrings(entries);
-
-  // Keep the SF2 template clean on every export: hide unused learner rows in every month tab
-  // and close the ID NUMBER border area without changing the school layout.
-  prepareAllSf2MonthSheets(entries, sharedStrings);
-
   const sheetPath = getSf2SheetPathForMonth(entries, monthValue);
   const sheetEntry = getZipEntry(entries, sheetPath);
   let sheetXml = zipEntryToText(sheetEntry);
