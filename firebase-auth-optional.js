@@ -1,539 +1,221 @@
-(function setupKindTrackFirebaseAdapter() {
-  const SCRIPT_API_MARKER = "script.google.com/macros/s/";
-  const COLLECTIONS = {
-    students: "kindtrack_students",
-    violationTypes: "kindtrack_violation_types",
-    violations: "kindtrack_violations",
-    settings: "kindtrack_settings",
-    attendance: "kindtrack_attendance"
-  };
+(function setupKindTrackOptionalAuth() {
+  let pendingResolve = null;
+  let latestUser = null;
+  let authReadyResolve = null;
+  const authReady = new Promise((resolve) => {
+    authReadyResolve = resolve;
+  });
 
-  const originalFetch = window.fetch.bind(window);
-  const serverTimestamp = () => window.firebase.firestore.FieldValue.serverTimestamp();
+  function ensureStyles() {
+    if (document.getElementById("kindTrackFirebaseAuthStyles")) return;
 
-  function getFirestore() {
-    if (!window.firebase || !window.firebase.firestore) {
-      throw new Error("Firebase Firestore SDK is not loaded.");
-    }
-
-    if (!window.firebase.apps.length && window.SFK_KINDTRACK_FIREBASE_CONFIG) {
-      window.firebase.initializeApp(window.SFK_KINDTRACK_FIREBASE_CONFIG);
-    }
-
-    return window.firebase.firestore();
-  }
-
-  function isKindTrackApiRequest(resource) {
-    const url = typeof resource === "string" ? resource : (resource && resource.url) || "";
-    return url.includes(SCRIPT_API_MARKER);
-  }
-
-  function jsonResponse(data, status = 200) {
-    return new Response(JSON.stringify(data), {
-      status,
-      headers: { "Content-Type": "application/json" }
-    });
-  }
-
-  function stripInternalFields(row) {
-    const output = {};
-    Object.keys(row || {}).forEach((key) => {
-      if (!key.startsWith("__")) output[key] = row[key];
-    });
-    return output;
-  }
-
-  function normalizeDocId(value, fallback) {
-    const raw = String(value || fallback || "").trim() || `DOC-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    return raw.replace(/[\\/#?[\]]/g, "_").slice(0, 140);
-  }
-
-  function normalizeNameKey(value) {
-    return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
-  }
-
-  function normalizeDate(value) {
-    if (!value) return "";
-    if (value instanceof Date && !Number.isNaN(value.getTime())) {
-      return value.toISOString().slice(0, 10);
-    }
-
-    const text = String(value).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-
-    const parsed = new Date(text);
-    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
-    return text;
-  }
-
-  function normalizeAttendanceStatus(status) {
-    const normalized = String(status || "").trim().toLowerCase();
-    if (["late", "lates", "tardy", "tardiness"].includes(normalized)) return "Tardy";
-    if (normalized === "absent") return "Absent";
-    if (normalized === "excused") return "Excused";
-    return "Present";
-  }
-
-  function isPaidWithKindnessStatus(value) {
-    const normalized = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-    return normalized === "paidwithkindness" || normalized === "kindnesspaid" || normalized === "paidkindness";
-  }
-
-  function isKindnessSettlement(value) {
-    return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "").includes("kindness");
-  }
-
-  function normalizeViolationSettlement(data) {
-    const status = String(data.status || data.Status || "").trim();
-    let settlementType = String(data.settlementType || data.SettlementType || data["Settlement Type"] || "Cash").trim();
-    let kindnessTask = String(data.kindnessTask || data.KindnessTask || data["Kindness Task"] || "").trim();
-    let kindnessStatus = String(data.kindnessStatus || data.KindnessStatus || data["Kindness Status"] || "Pending").trim();
-    let kindnessCompletedDate = normalizeDate(data.kindnessCompletedDate || data.KindnessCompletedDate || data["Kindness Completed Date"] || "");
-
-    if (!settlementType) settlementType = "Cash";
-    if (!kindnessStatus) kindnessStatus = "Pending";
-
-    if (isPaidWithKindnessStatus(status)) {
-      settlementType = "Kindness Alternative Payment";
-      kindnessStatus = "Completed";
-      if (!kindnessCompletedDate) kindnessCompletedDate = normalizeDate(new Date());
-    }
-
-    if (isKindnessSettlement(settlementType) && kindnessCompletedDate && String(kindnessStatus).toLowerCase() !== "completed") {
-      kindnessStatus = "Completed";
-    }
-
-    if (!isKindnessSettlement(settlementType)) {
-      kindnessTask = "";
-      kindnessStatus = "Pending";
-      kindnessCompletedDate = "";
-    }
-
-    return {
-      SettlementType: settlementType,
-      KindnessTask: kindnessTask,
-      KindnessStatus: kindnessStatus,
-      KindnessCompletedDate: kindnessCompletedDate
-    };
-  }
-
-  async function getRows(collectionName) {
-    const snapshot = await getFirestore().collection(collectionName).get();
-    return snapshot.docs
-      .sort((a, b) => {
-        const left = a.data() || {};
-        const right = b.data() || {};
-        const orderA = Number(left.__order || left.Order || 0);
-        const orderB = Number(right.__order || right.Order || 0);
-        if (orderA || orderB) return orderA - orderB;
-        return JSON.stringify(left).localeCompare(JSON.stringify(right));
-      })
-      .map((doc) => stripInternalFields(doc.data()));
-  }
-
-  async function handleGet() {
-    const [students, violationTypes, violations, settings, attendance] = await Promise.all([
-      getRows(COLLECTIONS.students),
-      getRows(COLLECTIONS.violationTypes),
-      getRows(COLLECTIONS.violations),
-      getRows(COLLECTIONS.settings),
-      getRows(COLLECTIONS.attendance)
-    ]);
-
-    return {
-      students,
-      violationTypes,
-      violations,
-      settings,
-      attendance
-    };
-  }
-
-  async function readJsonBody(resource, init) {
-    if (init && init.body) return JSON.parse(init.body);
-    if (resource && typeof resource.clone === "function") {
-      const text = await resource.clone().text();
-      return text ? JSON.parse(text) : {};
-    }
-    return {};
-  }
-
-  function buildViolationRow(data, recordId, studentId) {
-    const settlement = normalizeViolationSettlement(data);
-    return {
-      RecordID: recordId,
-      StudentID: studentId,
-      Date: normalizeDate(data.date),
-      ViolationType: data.violationType,
-      Fee: Number(data.fee) || 0,
-      Status: data.status || "Unpaid",
-      ActionTaken: data.actionTaken || "",
-      ReflectionCommitment: data.reflection || "",
-      FollowUpDate: normalizeDate(data.followUpDate || ""),
-      FollowUpStatus: data.followUpStatus || "Pending",
-      ParentContacted: data.parentContacted || "No",
-      Notes: data.notes || "",
-      EncodedBy: data.encodedBy || "Sir JR",
-      SettlementType: settlement.SettlementType,
-      KindnessTask: settlement.KindnessTask,
-      KindnessStatus: settlement.KindnessStatus,
-      KindnessCompletedDate: settlement.KindnessCompletedDate,
-      __updatedAt: serverTimestamp()
-    };
-  }
-
-  async function findDocByField(collectionName, field, value) {
-    const db = getFirestore();
-    const direct = await db.collection(collectionName).doc(normalizeDocId(value)).get();
-    if (direct.exists) return direct.ref;
-
-    const query = await db.collection(collectionName).where(field, "==", value).limit(1).get();
-    if (!query.empty) return query.docs[0].ref;
-    return null;
-  }
-
-  async function getTardinessType() {
-    const rows = await getRows(COLLECTIONS.violationTypes);
-    return rows.find((row) => {
-      const name = String(row.ViolationName || "").trim().toLowerCase();
-      return name === "tardiness" || name === "tardy" || name.includes("tardy") || name.includes("late");
-    }) || { ViolationName: "Tardiness", Fee: 0, KindnessAlternative: "", KindnessValue: "" };
-  }
-
-  function buildTardyAutoKey(date, studentId) {
-    return `ATT-TARDY-${normalizeDate(date)}-${String(studentId).trim()}`;
-  }
-
-  async function syncTardyViolations(date, attendanceRecords) {
-    const db = getFirestore();
-    const batch = db.batch();
-    const tardiness = await getTardinessType();
-    const violationName = tardiness.ViolationName || "Tardiness";
-    const violationFee = Number(tardiness.Fee) || 0;
-    const kindnessTask = tardiness.KindnessAlternative
-      ? `${tardiness.KindnessAlternative}${tardiness.KindnessValue ? ` (${tardiness.KindnessValue})` : ""}`
-      : "";
-    const result = { created: 0, updated: 0, removed: 0 };
-
-    for (const record of attendanceRecords) {
-      const studentId = String(record.studentId || record.StudentID || "").trim();
-      if (!studentId) continue;
-
-      const autoKey = buildTardyAutoKey(date, studentId);
-      const existingQuery = await db.collection(COLLECTIONS.violations).where("AutoKey", "==", autoKey).limit(1).get();
-      const existingRef = existingQuery.empty ? null : existingQuery.docs[0].ref;
-
-      if (normalizeAttendanceStatus(record.status || record.Status) === "Tardy") {
-        const ref = existingRef || db.collection(COLLECTIONS.violations).doc(normalizeDocId(`REC-${Date.now()}-${studentId}`));
-        const row = {
-          RecordID: existingRef ? existingQuery.docs[0].data().RecordID : ref.id,
-          StudentID: studentId,
-          Date: normalizeDate(date),
-          ViolationType: violationName,
-          Fee: violationFee,
-          Status: existingRef ? existingQuery.docs[0].data().Status || "Unpaid" : "Unpaid",
-          ActionTaken: "Attendance marked Tardy / Late",
-          ReflectionCommitment: "",
-          FollowUpDate: "",
-          FollowUpStatus: "Pending",
-          ParentContacted: "No",
-          Notes: "Auto-created from Daily Attendance Tardy / Late record.",
-          EncodedBy: "Daily Attendance",
-          AutoSource: "AttendanceTardy",
-          AutoKey: autoKey,
-          SettlementType: "Cash",
-          KindnessTask: kindnessTask,
-          KindnessStatus: "Pending",
-          KindnessCompletedDate: "",
-          __updatedAt: serverTimestamp()
-        };
-
-        if (!existingRef) row.__createdAt = serverTimestamp();
-        batch.set(ref, row, { merge: true });
-        if (existingRef) result.updated++;
-        else result.created++;
-        continue;
+    const style = document.createElement("style");
+    style.id = "kindTrackFirebaseAuthStyles";
+    style.textContent = `
+      #kindTrackFirebaseAuthModal {
+        position: fixed;
+        inset: 0;
+        z-index: 100000;
+        display: none;
+        place-items: center;
+        padding: 18px;
+        background: rgba(16, 16, 16, .38);
       }
 
-      if (existingRef) {
-        batch.delete(existingRef);
-        result.removed++;
-      }
-    }
-
-    await batch.commit();
-    return result;
-  }
-
-  async function saveAttendanceFast(data) {
-    const db = getFirestore();
-    const batch = db.batch();
-    const date = normalizeDate(data.date);
-    const records = Array.isArray(data.records) ? data.records : [];
-    const savedRecords = [];
-
-    if (!date) return { success: false, message: "Attendance date is required." };
-
-    records.forEach((record) => {
-      const studentId = String(record.studentId || record.StudentID || "").trim();
-      if (!studentId) return;
-
-      const status = normalizeAttendanceStatus(record.status || record.Status);
-      const remarks = String(record.remarks || record.Remarks || "").trim();
-      const attendanceId = `ATT-${date.replace(/-/g, "")}-${studentId}`;
-      const ref = db.collection(COLLECTIONS.attendance).doc(normalizeDocId(attendanceId));
-
-      savedRecords.push({ attendanceId, studentId, date, status, remarks });
-
-      if (status === "Present" && !remarks) {
-        batch.delete(ref);
-        return;
+      #kindTrackFirebaseAuthModal.is-open {
+        display: grid;
       }
 
-      batch.set(ref, {
-        AttendanceID: attendanceId,
-        StudentID: studentId,
-        Date: date,
-        Status: status,
-        Remarks: remarks,
-        __updatedAt: serverTimestamp()
-      }, { merge: true });
-    });
-
-    await batch.commit();
-
-    const syncResult = data.syncTardyViolations === false
-      ? { created: 0, updated: 0, removed: 0 }
-      : await syncTardyViolations(date, savedRecords);
-
-    return {
-      success: true,
-      records: savedRecords,
-      changedCount: savedRecords.length,
-      fastMode: true,
-      savedMode: "changed-records-only",
-      tardyViolationSync: syncResult
-    };
-  }
-
-  async function saveAttendance(data) {
-    const db = getFirestore();
-    const date = normalizeDate(data.date);
-    const records = Array.isArray(data.records) ? data.records : [];
-    const existing = await db.collection(COLLECTIONS.attendance).where("Date", "==", date).get();
-    const batch = db.batch();
-    const savedRecords = [];
-
-    existing.docs.forEach((doc) => batch.delete(doc.ref));
-
-    records.forEach((record) => {
-      const studentId = String(record.studentId || record.StudentID || "").trim();
-      if (!studentId) return;
-
-      const status = normalizeAttendanceStatus(record.status || record.Status);
-      const remarks = String(record.remarks || record.Remarks || "").trim();
-      const attendanceId = `ATT-${date.replace(/-/g, "")}-${studentId}`;
-      savedRecords.push({ attendanceId, studentId, date, status, remarks });
-
-      if (status === "Present" && !remarks) return;
-
-      batch.set(db.collection(COLLECTIONS.attendance).doc(normalizeDocId(attendanceId)), {
-        AttendanceID: attendanceId,
-        StudentID: studentId,
-        Date: date,
-        Status: status,
-        Remarks: remarks,
-        __updatedAt: serverTimestamp()
-      });
-    });
-
-    await batch.commit();
-
-    const syncResult = data.syncTardyViolations === false
-      ? { created: 0, updated: 0, removed: 0 }
-      : await syncTardyViolations(date, savedRecords);
-
-    return { success: true, records: savedRecords, tardyViolationSync: syncResult };
-  }
-
-  async function bulkAddViolationTypes(data) {
-    const db = getFirestore();
-    const records = Array.isArray(data.records) ? data.records : [];
-    const existingRows = await getRows(COLLECTIONS.violationTypes);
-    const existingNames = {};
-    let maxNumber = 0;
-    let added = 0;
-    let skipped = 0;
-    const batch = db.batch();
-
-    existingRows.forEach((row) => {
-      const nameKey = normalizeNameKey(row.ViolationName);
-      if (nameKey) existingNames[nameKey] = true;
-      const idMatch = String(row.ViolationID || "").match(/(\d+)/);
-      if (idMatch) maxNumber = Math.max(maxNumber, Number(idMatch[1]) || 0);
-    });
-
-    records.forEach((record) => {
-      const name = String(record.name || record.ViolationName || "").trim();
-      const nameKey = normalizeNameKey(name);
-
-      if (!name || existingNames[nameKey]) {
-        skipped++;
-        return;
+      .kindtrack-firebase-auth-card {
+        width: min(420px, 100%);
+        border: 3px solid #101010;
+        border-radius: 16px;
+        background: #fffbea;
+        box-shadow: 7px 7px 0 #101010;
+        padding: 22px;
+        font-family: Arial, Helvetica, sans-serif;
+        color: #101010;
       }
 
-      maxNumber++;
-      const violationId = `V${String(maxNumber).padStart(3, "0")}`;
-      batch.set(db.collection(COLLECTIONS.violationTypes).doc(normalizeDocId(violationId)), {
-        ViolationID: violationId,
-        ViolationName: name,
-        Fee: Number(record.fee || record.Fee) || 0,
-        AlertThreshold: Number(record.threshold || record.AlertThreshold) || 3,
-        Category: String(record.category || record.Category || "").trim(),
-        KindnessAlternative: String(record.kindnessAlternative || record.KindnessAlternative || record["Kindness Alternative"] || "").trim(),
-        KindnessValue: String(record.kindnessValue || record.KindnessValue || record["Kindness Value"] || "").trim(),
-        __createdAt: serverTimestamp(),
-        __updatedAt: serverTimestamp()
-      });
+      .kindtrack-firebase-auth-card h2 {
+        margin: 0 0 6px;
+        font-size: 24px;
+      }
 
-      existingNames[nameKey] = true;
-      added++;
+      .kindtrack-firebase-auth-card p {
+        margin: 0 0 16px;
+        line-height: 1.35;
+      }
+
+      #kindTrackFirebaseAuthForm {
+        display: grid;
+        gap: 12px;
+      }
+
+      #kindTrackFirebaseAuthForm label {
+        display: grid;
+        gap: 6px;
+        font-weight: 800;
+      }
+
+      #kindTrackFirebaseAuthForm input {
+        width: 100%;
+        border: 2px solid #101010;
+        border-radius: 10px;
+        padding: 11px;
+        font: inherit;
+      }
+
+      .kindtrack-firebase-auth-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+      }
+
+      .kindtrack-firebase-auth-actions button {
+        border: 3px solid #101010;
+        border-radius: 999px;
+        background: #ffcc00;
+        color: #101010;
+        box-shadow: 3px 3px 0 #101010;
+        font-weight: 900;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      .kindtrack-firebase-auth-actions button.secondary {
+        background: #fff;
+      }
+
+      #kindTrackFirebaseAuthMessage {
+        min-height: 20px;
+        margin-top: 12px !important;
+        color: #b00020;
+        font-weight: 800;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureModal() {
+    ensureStyles();
+
+    let modal = document.getElementById("kindTrackFirebaseAuthModal");
+    if (modal) return modal;
+
+    modal = document.createElement("div");
+    modal.id = "kindTrackFirebaseAuthModal";
+    modal.innerHTML = `
+      <div class="kindtrack-firebase-auth-card">
+        <h2>Admin Login</h2>
+        <p>Use the Firebase admin account to open editing tools.</p>
+
+        <form id="kindTrackFirebaseAuthForm">
+          <label>
+            Email
+            <input id="kindTrackFirebaseEmail" type="email" autocomplete="username" required />
+          </label>
+
+          <label>
+            Password
+            <input id="kindTrackFirebasePassword" type="password" autocomplete="current-password" required />
+          </label>
+
+          <div class="kindtrack-firebase-auth-actions">
+            <button class="secondary" id="kindTrackFirebaseCancel" type="button">Cancel</button>
+            <button id="kindTrackFirebaseSubmit" type="submit">Sign In</button>
+          </div>
+        </form>
+
+        <p id="kindTrackFirebaseAuthMessage"></p>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    const form = document.getElementById("kindTrackFirebaseAuthForm");
+    const cancel = document.getElementById("kindTrackFirebaseCancel");
+    const submit = document.getElementById("kindTrackFirebaseSubmit");
+    const email = document.getElementById("kindTrackFirebaseEmail");
+    const password = document.getElementById("kindTrackFirebasePassword");
+    const message = document.getElementById("kindTrackFirebaseAuthMessage");
+
+    cancel.addEventListener("click", () => {
+      modal.classList.remove("is-open");
+      if (pendingResolve) pendingResolve(false);
+      pendingResolve = null;
     });
 
-    await batch.commit();
-    return { success: true, added, skipped };
-  }
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      message.textContent = "";
+      submit.disabled = true;
+      submit.textContent = "Signing in...";
 
-  async function addViolation(data) {
-    const db = getFirestore();
-    const recordId = `REC-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const row = buildViolationRow(data, recordId, data.studentId);
-    row.__createdAt = serverTimestamp();
-    await db.collection(COLLECTIONS.violations).doc(normalizeDocId(recordId)).set(row);
-    return { success: true, recordId, savedSettlement: normalizeViolationSettlement(data) };
-  }
-
-  async function bulkAddViolations(data) {
-    const db = getFirestore();
-    const studentIds = Array.from(new Set((Array.isArray(data.studentIds) ? data.studentIds : [])
-      .map((studentId) => String(studentId || "").trim())
-      .filter(Boolean)));
-
-    if (!studentIds.length) return { success: false, message: "No students selected" };
-
-    const batch = db.batch();
-    const timestamp = Date.now();
-    const requestKey = Math.random().toString(36).slice(2, 8);
-    const recordIds = studentIds.map((studentId, index) => `REC-${timestamp}-${requestKey}-${index + 1}`);
-
-    studentIds.forEach((studentId, index) => {
-      const row = buildViolationRow(data, recordIds[index], studentId);
-      row.__createdAt = serverTimestamp();
-      batch.set(db.collection(COLLECTIONS.violations).doc(normalizeDocId(recordIds[index])), row);
+      try {
+        const credential = await firebase.auth().signInWithEmailAndPassword(email.value.trim(), password.value);
+        latestUser = credential.user || firebase.auth().currentUser || null;
+        modal.classList.remove("is-open");
+        if (pendingResolve) pendingResolve(true);
+        pendingResolve = null;
+      } catch (error) {
+        message.textContent = "Login failed. Check email/password.";
+        console.error("Firebase login error:", error);
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Sign In";
+      }
     });
 
-    await batch.commit();
-    return {
-      success: true,
-      savedCount: studentIds.length,
-      recordIds,
-      savedSettlement: normalizeViolationSettlement(data)
-    };
+    return modal;
   }
 
-  async function saveViolationsDirect(data, selectedStudentIds) {
-    if (window.SFK_KINDTRACK_AUTH) {
-      const signedIn = await window.SFK_KINDTRACK_AUTH.ensureSignedIn();
-      if (!signedIn) {
-        return { success: false, message: "Firebase admin login is required to save changes." };
+  async function ensureSignedIn() {
+    if (!window.firebase || !firebase.auth) {
+      throw new Error("Firebase Auth SDK is not loaded.");
+    }
+
+    await authReady;
+
+    if (latestUser || firebase.auth().currentUser) return true;
+
+    const modal = ensureModal();
+    modal.classList.add("is-open");
+
+    return new Promise((resolve) => {
+      pendingResolve = resolve;
+    });
+  }
+
+  if (!window.firebase || !firebase.auth) {
+    console.error("Firebase Auth SDK is not loaded.");
+    return;
+  }
+
+  ensureStyles();
+
+  const persistence = firebase.auth.Auth && firebase.auth.Auth.Persistence
+    ? firebase.auth.Auth.Persistence.LOCAL
+    : null;
+
+  const persistenceReady = persistence
+    ? firebase.auth().setPersistence(persistence).catch((error) => {
+      console.warn("Firebase auth persistence fallback:", error);
+    })
+    : Promise.resolve();
+
+  persistenceReady.finally(() => {
+    firebase.auth().onAuthStateChanged((user) => {
+      latestUser = user || null;
+      if (authReadyResolve) {
+        authReadyResolve();
+        authReadyResolve = null;
       }
-    }
+    });
+  });
 
-    const studentIds = Array.from(new Set((Array.isArray(selectedStudentIds) ? selectedStudentIds : [])
-      .map((studentId) => String(studentId || "").trim())
-      .filter(Boolean)));
-
-    if (!studentIds.length) {
-      return { success: false, message: "No students selected" };
-    }
-
-    if (studentIds.length === 1) {
-      return addViolation({ ...data, studentId: studentIds[0] });
-    }
-
-    return bulkAddViolations({ ...data, studentIds });
-  }
-
-  async function editViolation(data) {
-    const ref = await findDocByField(COLLECTIONS.violations, "RecordID", data.recordId);
-    if (!ref) return { success: false, message: "Record not found" };
-
-    const settlement = normalizeViolationSettlement(data);
-    await ref.set({
-      Date: normalizeDate(data.date),
-      ViolationType: data.violationType,
-      Fee: Number(data.fee) || 0,
-      Status: data.status,
-      ActionTaken: data.actionTaken || "",
-      ReflectionCommitment: data.reflection || "",
-      FollowUpDate: normalizeDate(data.followUpDate || ""),
-      FollowUpStatus: data.followUpStatus || "Pending",
-      ParentContacted: data.parentContacted || "No",
-      Notes: data.notes || "",
-      SettlementType: settlement.SettlementType,
-      KindnessTask: settlement.KindnessTask,
-      KindnessStatus: settlement.KindnessStatus,
-      KindnessCompletedDate: settlement.KindnessCompletedDate,
-      __updatedAt: serverTimestamp()
-    }, { merge: true });
-
-    return { success: true, savedSettlement: settlement };
-  }
-
-  async function deleteViolation(data) {
-    const ref = await findDocByField(COLLECTIONS.violations, "RecordID", data.recordId);
-    if (!ref) return { success: false, message: "Record not found" };
-    await ref.delete();
-    return { success: true };
-  }
-
-  async function handlePost(data) {
-    if (data.action === "saveAttendanceFast") return saveAttendanceFast(data);
-    if (data.action === "saveAttendance") return saveAttendance(data);
-    if (data.action === "bulkAddViolationTypes") return bulkAddViolationTypes(data);
-    if (data.action === "bulkAddViolations") return bulkAddViolations(data);
-    if (data.action === "addViolation") return addViolation(data);
-    if (data.action === "editViolation") return editViolation(data);
-    if (data.action === "deleteViolation") return deleteViolation(data);
-    return { success: false, message: "Invalid action" };
-  }
-
-  window.fetch = async function kindTrackFirebaseFetch(resource, init = {}) {
-    if (!isKindTrackApiRequest(resource)) {
-      return originalFetch(resource, init);
-    }
-
-    try {
-      const method = String((init && init.method) || (resource && resource.method) || "GET").toUpperCase();
-      if (method === "POST") {
-        if (window.SFK_KINDTRACK_AUTH) {
-          const signedIn = await window.SFK_KINDTRACK_AUTH.ensureSignedIn();
-          if (!signedIn) {
-            return jsonResponse({ success: false, message: "Firebase admin login is required to save changes." }, 401);
-          }
-        }
-        return jsonResponse(await handlePost(await readJsonBody(resource, init)));
-      }
-      return jsonResponse(await handleGet());
-    } catch (error) {
-      console.error("KindTrack Firebase adapter error:", error);
-      return jsonResponse({ success: false, message: error.message || "Firebase adapter error" }, 500);
-    }
-  };
-
-  window.SFK_KINDTRACK_FIREBASE_ADAPTER = {
-    collections: COLLECTIONS,
-    loadAll: handleGet,
-    saveViolations: saveViolationsDirect
+  window.SFK_KINDTRACK_AUTH = {
+    ensureSignedIn,
+    getCurrentUser: () => latestUser || firebase.auth().currentUser || null
   };
 })();
