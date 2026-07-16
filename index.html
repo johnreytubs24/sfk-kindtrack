@@ -204,6 +204,15 @@
       </div>
       <div class="attendance-list-actions attendance-header-actions">
         <button
+          id="attendanceShareBtn"
+          class="monthly-summary-icon-btn attendance-share-btn"
+          type="button"
+          title="Share Daily Attendance"
+        >
+          <span aria-hidden="true">📤</span>
+          <span class="monthly-summary-icon-label">Share</span>
+        </button>
+        <button
           id="toggleMonthlyAttendanceSummaryBtn"
           class="monthly-summary-icon-btn"
           type="button"
@@ -876,6 +885,35 @@
 
     <div id="attendanceStatusList" class="attendance-status-list">
       <p class="empty-message">No students found.</p>
+    </div>
+  </div>
+</div>
+
+<div class="modal hidden" id="attendanceShareModal">
+  <div class="modal-card attendance-share-modal-card">
+    <div class="modal-title-row">
+      <div>
+        <h2>📤 Share Attendance Update</h2>
+        <p id="attendanceShareSubtitle" class="modal-subtitle">Generate a downloadable image for the selected attendance date.</p>
+      </div>
+      <button type="button" id="closeAttendanceShareModal" class="modal-x">×</button>
+    </div>
+
+    <div class="attendance-share-controls">
+      <div class="attendance-share-view-toggle" role="group" aria-label="Attendance share preview size">
+        <button type="button" id="attendanceSharePreviewSquareBtn" class="share-size-btn active">Preview Square</button>
+        <button type="button" id="attendanceSharePreviewPubmatBtn" class="share-size-btn">Preview Pubmat</button>
+      </div>
+      <p class="attendance-share-helper">The image includes the daily totals plus the complete absent and tardy name lists for the selected date.</p>
+    </div>
+
+    <div class="attendance-share-preview-shell">
+      <img id="attendanceSharePreviewImage" class="attendance-share-preview-image" alt="Daily attendance share preview" />
+    </div>
+
+    <div class="attendance-share-actions">
+      <button type="button" id="downloadAttendanceShareSquareBtn" class="print-btn">⬇ Download Square</button>
+      <button type="button" id="downloadAttendanceSharePubmatBtn" class="print-btn">⬇ Download Pubmat</button>
     </div>
   </div>
 </div>

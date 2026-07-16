@@ -158,6 +158,15 @@ const printAttendanceBtn = document.getElementById("printAttendanceBtn");
 const printMonthlyAttendanceBtn = document.getElementById("printMonthlyAttendanceBtn");
 const downloadMonthlyAttendanceBtn = document.getElementById("downloadMonthlyAttendanceBtn");
 const downloadSf2AttendanceBtn = document.getElementById("downloadSf2AttendanceBtn");
+const attendanceShareBtn = document.getElementById("attendanceShareBtn");
+const attendanceShareModal = document.getElementById("attendanceShareModal");
+const closeAttendanceShareModal = document.getElementById("closeAttendanceShareModal");
+const attendanceShareSubtitle = document.getElementById("attendanceShareSubtitle");
+const attendanceSharePreviewImage = document.getElementById("attendanceSharePreviewImage");
+const attendanceSharePreviewSquareBtn = document.getElementById("attendanceSharePreviewSquareBtn");
+const attendanceSharePreviewPubmatBtn = document.getElementById("attendanceSharePreviewPubmatBtn");
+const downloadAttendanceShareSquareBtn = document.getElementById("downloadAttendanceShareSquareBtn");
+const downloadAttendanceSharePubmatBtn = document.getElementById("downloadAttendanceSharePubmatBtn");
 const toggleMonthlyAttendanceSummaryBtn = document.getElementById("toggleMonthlyAttendanceSummaryBtn");
 const monthlyAttendancePanel = document.getElementById("monthlyAttendancePanel");
 const todayAttendanceBtn = document.getElementById("todayAttendanceBtn");
@@ -1258,6 +1267,513 @@ function renderAttendanceSummary(rows) {
     <button type="button" class="attendance-count-chip tardy" data-attendance-status="Tardy"><span>Tardy</span><strong>${counts.Tardy}</strong></button>
     <button type="button" class="attendance-count-chip total" data-attendance-status="all"><span>Total</span><strong>${rows.length}</strong></button>
   `;
+}
+
+let attendanceSharePreviewType = "square";
+
+function getAttendanceShareRowsByStatus(dateValue = getAttendanceDateValue(), status = "Absent") {
+  return getAttendanceRowsForDate(dateValue)
+    .filter(row => row.status === status)
+    .sort((a, b) => sortByName(a.student, b.student));
+}
+
+function buildAttendanceShareReport(dateValue = getAttendanceDateValue()) {
+  const rows = getAttendanceRowsForDate(dateValue);
+  const absentRows = getAttendanceShareRowsByStatus(dateValue, "Absent");
+  const tardyRows = getAttendanceShareRowsByStatus(dateValue, "Tardy");
+  const counts = getAttendanceCounts(rows);
+
+  return {
+    dateValue,
+    dateLabel: formatDisplayDate(dateValue),
+    presentCount: counts.Present,
+    absentCount: absentRows.length,
+    tardyCount: tardyRows.length,
+    totalStudents: rows.length,
+    absentNames: absentRows.map(row => row.student.name),
+    tardyNames: tardyRows.map(row => row.student.name)
+  };
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius = 24) {
+  const safeRadius = Math.max(0, Math.min(radius, width / 2, height / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + safeRadius, y);
+  ctx.lineTo(x + width - safeRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  ctx.lineTo(x + width, y + height - safeRadius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  ctx.lineTo(x + safeRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  ctx.lineTo(x, y + safeRadius);
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+  ctx.closePath();
+}
+
+function wrapCanvasText(ctx, text, maxWidth) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return [""];
+
+  const words = normalized.split(/\s+/);
+  const lines = [];
+  let currentLine = "";
+
+  words.forEach(word => {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (ctx.measureText(testLine).width <= maxWidth || !currentLine) {
+      currentLine = testLine;
+      return;
+    }
+
+    lines.push(currentLine);
+    currentLine = word;
+  });
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines;
+}
+
+function tryAttendanceShareListLayout(ctx, names, contentWidth, contentHeight, fontSize, columnCount, options = {}) {
+  const gap = 18;
+  const columnWidth = (contentWidth - gap * (columnCount - 1)) / columnCount;
+  const lineHeight = Math.round(fontSize * 1.28);
+  const itemSpacing = Math.round(fontSize * 0.48);
+  const placements = [];
+  const noWrap = Boolean(options.noWrap);
+  let columnIndex = 0;
+  let cursorY = 0;
+
+  for (const name of names) {
+    const singleLine = `• ${name}`;
+    let lines;
+
+    if (noWrap) {
+      if (ctx.measureText(singleLine).width > columnWidth) {
+        return null;
+      }
+      lines = [singleLine];
+    } else {
+      lines = wrapCanvasText(ctx, singleLine, columnWidth);
+    }
+
+    const blockHeight = lines.length * lineHeight + itemSpacing;
+
+    if (cursorY + blockHeight > contentHeight && columnIndex < columnCount - 1) {
+      columnIndex += 1;
+      cursorY = 0;
+    }
+
+    if (cursorY + blockHeight > contentHeight) {
+      return null;
+    }
+
+    placements.push({ columnIndex, y: cursorY, lines });
+    cursorY += blockHeight;
+  }
+
+  return { columnWidth, gap, lineHeight, fontSize, placements };
+}
+
+function getAttendanceShareListLayout(ctx, names, contentWidth, contentHeight, type = "square", options = {}) {
+  const singleColumn = Boolean(options.singleColumn);
+  const noWrap = Boolean(options.noWrap);
+  let columnOptions;
+
+  if (singleColumn) {
+    columnOptions = [1];
+  } else if (type === "pubmat") {
+    const preferredColumns = names.length > 20 ? 3 : names.length > 12 ? 2 : 1;
+    columnOptions = noWrap
+      ? [...new Set([1, 2, preferredColumns, 3, 4])].filter(value => value >= 1 && value <= 4)
+      : [...new Set([preferredColumns, 1, 2, 3, 4])].filter(value => value >= 1 && value <= 4);
+  } else {
+    const preferredColumns = names.length > 12 ? 3 : names.length > 3 ? 2 : 1;
+    columnOptions = noWrap
+      ? [...new Set([1, 2, preferredColumns, 3, 4])].filter(value => value >= 1 && value <= 4)
+      : [...new Set([preferredColumns, 2, 1, 3, 4])].filter(value => value >= 1 && value <= 4);
+  }
+
+  const fontOptions = type === "pubmat"
+    ? [24, 22, 20, 18, 16, 14, 13, 12]
+    : [30, 28, 26, 24, 22, 20, 18, 16, 14, 13, 12];
+
+  for (const columnCount of columnOptions) {
+    for (const fontSize of fontOptions) {
+      ctx.font = `700 ${fontSize}px Arial`;
+      const layout = tryAttendanceShareListLayout(ctx, names, contentWidth, contentHeight, fontSize, columnCount, { noWrap });
+      if (layout) return layout;
+    }
+  }
+
+  ctx.font = "700 12px Arial";
+  return tryAttendanceShareListLayout(ctx, names, contentWidth, contentHeight, 12, singleColumn ? 1 : (names.length > 20 ? 4 : 3), { noWrap });
+}
+
+function drawAttendanceShareNameSection(ctx, config) {
+  const { x, y, width, height, title, names, accent, type, note = "" } = config;
+  const badgeLabel = title.replace(/\s+Students$/i, "").toUpperCase();
+  const isPubmat = type === "pubmat";
+  const paddingX = isPubmat ? 34 : 24;
+  const titleFontSize = isPubmat ? 28 : 24;
+  const noteHeight = note ? (isPubmat ? 42 : 30) : 0;
+  const headerBottomY = y + (note ? (isPubmat ? 112 : 84) : (isPubmat ? 74 : 58));
+
+  ctx.save();
+  ctx.shadowColor = isPubmat ? "rgba(15, 23, 42, 0.10)" : "rgba(15, 23, 42, 0.08)";
+  ctx.shadowBlur = isPubmat ? 16 : 10;
+  ctx.shadowOffsetY = isPubmat ? 8 : 6;
+  drawRoundedRect(ctx, x, y, width, height, 28);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.restore();
+
+  ctx.lineWidth = isPubmat ? 1.75 : 2;
+  ctx.strokeStyle = accent;
+  drawRoundedRect(ctx, x, y, width, height, 28);
+  ctx.stroke();
+
+  ctx.fillStyle = "#0f172a";
+  ctx.font = `900 ${titleFontSize}px Arial`;
+  ctx.textAlign = "left";
+  ctx.fillText(`${title} (${names.length})`, x + paddingX, y + (isPubmat ? 44 : 38));
+
+  const badgeWidth = Math.min(width * (isPubmat ? 0.18 : 0.24), isPubmat ? 128 : 150);
+  drawRoundedRect(ctx, x + width - paddingX - badgeWidth, y + (isPubmat ? 18 : 14), badgeWidth, isPubmat ? 34 : 30, 15);
+  ctx.fillStyle = accent;
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `900 ${isPubmat ? 17 : 16}px Arial`;
+  ctx.textAlign = "center";
+  ctx.fillText(badgeLabel, x + width - paddingX - badgeWidth / 2, y + (isPubmat ? 40 : 34));
+  ctx.textAlign = "left";
+
+  if (note) {
+    const noteWidth = Math.min(width - paddingX * 2 - 10, isPubmat ? 420 : 350);
+    drawRoundedRect(ctx, x + paddingX, y + (isPubmat ? 58 : 46), noteWidth, noteHeight, noteHeight / 2);
+    ctx.fillStyle = "#fff7ed";
+    ctx.fill();
+    ctx.strokeStyle = "#f59e0b";
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+    ctx.fillStyle = "#9a3412";
+    ctx.font = `800 ${isPubmat ? 17 : 14}px Arial`;
+    ctx.fillText(note, x + paddingX + 14, y + (isPubmat ? 58 : 46) + noteHeight / 2 + (isPubmat ? 6 : 5));
+  }
+
+  ctx.strokeStyle = "#e5e7eb";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x + paddingX, headerBottomY);
+  ctx.lineTo(x + width - paddingX, headerBottomY);
+  ctx.stroke();
+
+  const contentX = x + paddingX;
+  const contentY = headerBottomY + (isPubmat ? 22 : 14);
+  const contentWidth = width - paddingX * 2;
+  const contentHeight = height - (contentY - y) - (isPubmat ? 18 : 12);
+
+  if (!names.length) {
+    ctx.fillStyle = "#6b7280";
+    ctx.font = `700 ${isPubmat ? 22 : 22}px Arial`;
+    ctx.fillText(`No ${title.toLowerCase()} for this day.`, contentX, contentY + 26);
+    return;
+  }
+
+  const layout = getAttendanceShareListLayout(ctx, names, contentWidth, contentHeight, type, {
+    singleColumn: isPubmat && names.length <= 12,
+    noWrap: true
+  });
+  if (!layout) return;
+
+  ctx.fillStyle = "#111827";
+  ctx.font = `700 ${layout.fontSize}px Arial`;
+  layout.placements.forEach(placement => {
+    const columnX = contentX + placement.columnIndex * (layout.columnWidth + layout.gap);
+    placement.lines.forEach((line, lineIndex) => {
+      const lineY = contentY + placement.y + layout.lineHeight * (lineIndex + 1);
+      ctx.fillText(line, columnX, lineY);
+    });
+  });
+}
+
+function renderAttendanceShareCanvas(report, type = "square") {
+  const isPubmat = type === "pubmat";
+  const config = isPubmat
+    ? { width: 1080, height: 1350, padding: 42, headerHeight: 242, summaryHeight: 150, gap: 20, footerSpace: 18 }
+    : { width: 1080, height: 1080, padding: 56, headerHeight: 208, summaryHeight: 152, gap: 18, footerSpace: 10 };
+
+  const canvas = document.createElement("canvas");
+  canvas.width = config.width;
+  canvas.height = config.height;
+  const ctx = canvas.getContext("2d");
+
+  if (isPubmat) {
+    const pageGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    pageGradient.addColorStop(0, "#f6ecd1");
+    pageGradient.addColorStop(0.42, "#f8fafc");
+    pageGradient.addColorStop(1, "#eef2ff");
+    ctx.fillStyle = pageGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "rgba(250, 204, 21, 0.18)";
+    ctx.beginPath(); ctx.arc(95, 95, 120, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(980, 1260, 150, 0, Math.PI * 2); ctx.fill();
+
+    const accentGradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    accentGradient.addColorStop(0, "#f59e0b");
+    accentGradient.addColorStop(1, "#facc15");
+    ctx.fillStyle = accentGradient;
+    drawRoundedRect(ctx, 34, 26, canvas.width - 68, 52, 26);
+    ctx.fill();
+  } else {
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fde68a";
+    ctx.fillRect(0, 0, canvas.width, 120);
+  }
+
+  const outerX = config.padding;
+  const outerY = isPubmat ? 54 : 38;
+  const outerWidth = canvas.width - config.padding * 2;
+  const outerHeight = canvas.height - (isPubmat ? 104 : 76);
+
+  ctx.save();
+  ctx.shadowColor = isPubmat ? "rgba(15, 23, 42, 0.14)" : "rgba(15, 23, 42, 0.10)";
+  ctx.shadowBlur = isPubmat ? 28 : 14;
+  ctx.shadowOffsetY = isPubmat ? 10 : 8;
+  drawRoundedRect(ctx, outerX, outerY, outerWidth, outerHeight, 34);
+  ctx.fillStyle = "#fffdf8";
+  ctx.fill();
+  ctx.restore();
+
+  ctx.lineWidth = isPubmat ? 2.5 : 3;
+  ctx.strokeStyle = isPubmat ? "#eab308" : "#facc15";
+  drawRoundedRect(ctx, outerX, outerY, outerWidth, outerHeight, 34);
+  ctx.stroke();
+
+  const contentX = outerX + (isPubmat ? 22 : 30);
+  const contentWidth = outerWidth - (isPubmat ? 44 : 60);
+
+  if (isPubmat) {
+    const headerGradient = ctx.createLinearGradient(contentX, 86, contentX + contentWidth, 86 + config.headerHeight);
+    headerGradient.addColorStop(0, "#0f172a");
+    headerGradient.addColorStop(1, "#334155");
+    drawRoundedRect(ctx, contentX, 86, contentWidth, config.headerHeight, 30);
+    ctx.fillStyle = headerGradient;
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(255,255,255,0.08)";
+    drawRoundedRect(ctx, contentX + contentWidth - 180, 104, 122, 26, 13);
+    ctx.fill();
+    ctx.fillStyle = "#e5e7eb";
+    ctx.font = "700 15px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("DAILY REPORT", contentX + contentWidth - 119, 122);
+    ctx.textAlign = "left";
+
+    const titlePillWidth = 484;
+    drawRoundedRect(ctx, contentX + 28, 106, titlePillWidth, 50, 24);
+    ctx.fillStyle = "#facc15";
+    ctx.fill();
+    ctx.fillStyle = "#111827";
+    ctx.font = "900 24px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("DAILY ATTENDANCE UPDATE", contentX + 28 + titlePillWidth / 2, 139);
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 40px Arial";
+    ctx.fillText("Grade 8 - St. Faustina Kowalska", contentX + 28, 198);
+    ctx.font = "700 25px Arial";
+    ctx.fillStyle = "#e5e7eb";
+    ctx.fillText("2026-2027 School Year", contentX + 28, 232);
+
+    drawRoundedRect(ctx, contentX + 28, 252, 334, 46, 23);
+    ctx.fillStyle = "rgba(250, 204, 21, 0.18)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(250, 204, 21, 0.72)";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = "#fef3c7";
+    ctx.font = "900 23px Arial";
+    ctx.fillText(`Date: ${report.dateLabel}`, contentX + 48, 281);
+
+    drawRoundedRect(ctx, contentX + contentWidth - 262, 252, 234, 46, 23);
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.14)";
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "800 21px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`Total Students: ${report.totalStudents}`, contentX + contentWidth - 145, 281);
+    ctx.textAlign = "left";
+  } else {
+    drawRoundedRect(ctx, contentX, 72, contentWidth, config.headerHeight, 34);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "#e5e7eb";
+    ctx.stroke();
+
+    const titlePillWidth = 450;
+    drawRoundedRect(ctx, contentX + 24, 94, titlePillWidth, 50, 24);
+    ctx.fillStyle = "#111827";
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 21px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("DAILY ATTENDANCE UPDATE", contentX + 24 + titlePillWidth / 2, 126);
+    ctx.textAlign = "left";
+
+    ctx.fillStyle = "#111827";
+    ctx.font = "900 35px Arial";
+    ctx.fillText("Grade 8 - St. Faustina Kowalska", contentX + 24, 184);
+    ctx.font = "700 24px Arial";
+    ctx.fillStyle = "#374151";
+    ctx.fillText("2026-2027 School Year", contentX + 24, 220);
+
+    drawRoundedRect(ctx, contentX + 24, 236, 340, 44, 22);
+    ctx.fillStyle = "#fef3c7";
+    ctx.fill();
+    ctx.fillStyle = "#92400e";
+    ctx.font = "900 22px Arial";
+    ctx.fillText(`Date: ${report.dateLabel}`, contentX + 44, 264);
+
+    ctx.fillStyle = "#6b7280";
+    ctx.font = "700 20px Arial";
+    ctx.fillText(`Total Students: ${report.totalStudents}`, contentX + contentWidth - 250, 264);
+  }
+
+  const summaryY = (isPubmat ? 86 : 72) + config.headerHeight + config.gap;
+  const summaryGap = 18;
+  const summaryWidth = (contentWidth - summaryGap * 2) / 3;
+  const summaryItems = [
+    { label: "Present", value: report.presentCount, fill: isPubmat ? "#f0fdf4" : "#dcfce7", border: "#22c55e", text: "#166534", accent: "#16a34a" },
+    { label: "Absent", value: report.absentCount, fill: isPubmat ? "#fef2f2" : "#fee2e2", border: "#ef4444", text: "#991b1b", accent: "#dc2626" },
+    { label: "Tardy", value: report.tardyCount, fill: isPubmat ? "#fffbeb" : "#fef3c7", border: "#f59e0b", text: "#92400e", accent: "#f59e0b" }
+  ];
+
+  summaryItems.forEach((item, index) => {
+    const cardX = contentX + index * (summaryWidth + summaryGap);
+    ctx.save();
+    ctx.shadowColor = isPubmat ? "rgba(15, 23, 42, 0.10)" : "rgba(15, 23, 42, 0.08)";
+    ctx.shadowBlur = isPubmat ? 14 : 10;
+    ctx.shadowOffsetY = isPubmat ? 6 : 6;
+    drawRoundedRect(ctx, cardX, summaryY, summaryWidth, config.summaryHeight, 26);
+    ctx.fillStyle = item.fill;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.lineWidth = 1.8;
+    ctx.strokeStyle = item.border;
+    drawRoundedRect(ctx, cardX, summaryY, summaryWidth, config.summaryHeight, 26);
+    ctx.stroke();
+
+    drawRoundedRect(ctx, cardX + 18, summaryY + 16, summaryWidth - 36, 14, 8);
+    ctx.fillStyle = item.accent;
+    ctx.fill();
+
+    ctx.fillStyle = item.text;
+    ctx.font = isPubmat ? "900 28px Arial" : "900 22px Arial";
+    ctx.fillText(item.label, cardX + 24, summaryY + (isPubmat ? 68 : 60));
+    ctx.font = isPubmat ? "900 60px Arial" : "900 56px Arial";
+    ctx.fillText(String(item.value), cardX + 24, summaryY + (isPubmat ? 128 : 128));
+  });
+
+  const listStartY = summaryY + config.summaryHeight + config.gap;
+  const listAvailableHeight = canvas.height - listStartY - config.padding - config.footerSpace;
+  const listGap = 18;
+  const absentWeight = Math.max(report.absentNames.length + (isPubmat ? 0 : 2), isPubmat ? 4 : 4);
+  const tardyWeight = Math.max(report.tardyNames.length, isPubmat ? 3 : 4);
+  const totalWeight = absentWeight + tardyWeight;
+  const minHeight = isPubmat ? 250 : 190;
+  let absentHeight = Math.round((listAvailableHeight - listGap) * (absentWeight / totalWeight));
+  absentHeight = Math.max(minHeight, Math.min(absentHeight, listAvailableHeight - listGap - minHeight));
+  const tardyHeight = listAvailableHeight - listGap - absentHeight;
+
+  drawAttendanceShareNameSection(ctx, {
+    x: contentX,
+    y: listStartY,
+    width: contentWidth,
+    height: absentHeight,
+    title: "Absent Students",
+    names: report.absentNames,
+    accent: "#ef4444",
+    type,
+    note: "Need excuse letter when student returns"
+  });
+
+  drawAttendanceShareNameSection(ctx, {
+    x: contentX,
+    y: listStartY + absentHeight + listGap,
+    width: contentWidth,
+    height: tardyHeight,
+    title: "Tardy Students",
+    names: report.tardyNames,
+    accent: "#f59e0b",
+    type
+  });
+
+  return canvas;
+}
+
+function getAttendanceShareImageDataUrl
+(type = attendanceSharePreviewType, dateValue = getAttendanceDateValue()) {
+  const report = buildAttendanceShareReport(dateValue);
+  return renderAttendanceShareCanvas(report, type).toDataURL("image/png");
+}
+
+function setAttendanceSharePreviewButtons() {
+  if (attendanceSharePreviewSquareBtn) {
+    attendanceSharePreviewSquareBtn.classList.toggle("active", attendanceSharePreviewType === "square");
+  }
+
+  if (attendanceSharePreviewPubmatBtn) {
+    attendanceSharePreviewPubmatBtn.classList.toggle("active", attendanceSharePreviewType === "pubmat");
+  }
+}
+
+function renderAttendanceSharePreview(type = "square") {
+  if (!attendanceSharePreviewImage) return;
+  attendanceSharePreviewType = type;
+  setAttendanceSharePreviewButtons();
+  const dateValue = getAttendanceDateValue();
+  if (attendanceShareSubtitle) {
+    attendanceShareSubtitle.textContent = `Selected date: ${formatDisplayDate(dateValue)} • Generate a saveable attendance image.`;
+  }
+  attendanceSharePreviewImage.src = getAttendanceShareImageDataUrl(type, dateValue);
+  attendanceSharePreviewImage.alt = `Attendance update preview for ${formatDisplayDate(dateValue)}`;
+}
+
+function openAttendanceShareModal() {
+  if (!attendanceShareModal) return;
+  renderAttendanceSharePreview("square");
+  openModal(attendanceShareModal);
+}
+
+function closeAttendanceSharePopup() {
+  closeModal(attendanceShareModal);
+}
+
+function downloadDataUrlFile(dataUrl, filename) {
+  const link = document.createElement("a");
+  link.href = dataUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function downloadAttendanceShareImage(type = "square") {
+  const dateValue = getAttendanceDateValue();
+  const fileName = `daily-attendance-update-${dateValue}-${type}.png`;
+  const dataUrl = getAttendanceShareImageDataUrl(type, dateValue);
+  downloadDataUrlFile(dataUrl, fileName);
+  showToast(`Attendance ${type} image downloaded.`);
 }
 
 function renderAttendanceQuickSummary() {
@@ -6268,6 +6784,38 @@ if (attendanceMonth) {
 
 if (toggleMonthlyAttendanceSummaryBtn) {
   toggleMonthlyAttendanceSummaryBtn.addEventListener("click", toggleMonthlyAttendancePanel);
+}
+
+if (attendanceShareBtn) {
+  attendanceShareBtn.addEventListener("click", openAttendanceShareModal);
+}
+
+if (closeAttendanceShareModal) {
+  closeAttendanceShareModal.addEventListener("click", closeAttendanceSharePopup);
+}
+
+if (attendanceShareModal) {
+  attendanceShareModal.addEventListener("click", event => {
+    if (event.target === attendanceShareModal) {
+      closeAttendanceSharePopup();
+    }
+  });
+}
+
+if (attendanceSharePreviewSquareBtn) {
+  attendanceSharePreviewSquareBtn.addEventListener("click", () => renderAttendanceSharePreview("square"));
+}
+
+if (attendanceSharePreviewPubmatBtn) {
+  attendanceSharePreviewPubmatBtn.addEventListener("click", () => renderAttendanceSharePreview("pubmat"));
+}
+
+if (downloadAttendanceShareSquareBtn) {
+  downloadAttendanceShareSquareBtn.addEventListener("click", () => downloadAttendanceShareImage("square"));
+}
+
+if (downloadAttendanceSharePubmatBtn) {
+  downloadAttendanceSharePubmatBtn.addEventListener("click", () => downloadAttendanceShareImage("pubmat"));
 }
 
 if (todayAttendanceBtn && attendanceDate) {

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sfk-kindtrack-sf2-export-v14';
+const CACHE_NAME = 'sfk-kindtrack-attendance-share-v19';
 const APP_SHELL = [
   './',
   './index.html',
