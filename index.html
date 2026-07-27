@@ -76,6 +76,7 @@
   <button type="button" id="quickActionBoardsBtn">📋 Action Boards</button>
   <button type="button" id="quickSummaryBtn">📊 Summary</button>
   <button type="button" id="quickPrintAllBtn">🖨 Print All</button>
+  <button type="button" id="quickPrintViolationListBtn">🧾 Violation List PDF</button>
 </section>
 
 <section class="dashboard">
@@ -543,6 +544,10 @@
     <div id="studentControls" class="student-controls">
       <button id="printAllBtn" class="print-btn print-all-btn admin-only" type="button">
         🖨 Print All Records
+      </button>
+
+      <button id="printViolationListBtn" class="print-btn print-all-btn admin-only" type="button">
+        🧾 Print Violation List (A4 Landscape)
       </button>
 
       <input
@@ -1039,6 +1044,6 @@
 <script src="firebase-config.js"></script>
 <script src="firebase-auth-optional.js?v=12"></script>
 <script src="firebase-adapter.js?v=14"></script>
-<script src="script.js?v=17"></script>
+<script src="script.js?v=20"></script>
 </body>
 </html>
