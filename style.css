@@ -842,13 +842,28 @@ select {
   font-weight: 900;
 }
 
+#alertList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 10px;
+  align-items: stretch;
+}
+
+#alertList > .empty-message {
+  grid-column: 1 / -1;
+}
+
 .alert-card {
+  position: relative;
+  min-width: 0;
+  height: 100%;
   background: #fffaf0;
   border: 1px solid var(--line);
   border-left: 8px solid var(--yellow);
-  padding: 14px;
+  padding: 14px 72px 14px 14px;
   border-radius: 18px;
-  margin-top: 10px;
+  margin-top: 0;
   cursor: pointer;
 }
 
@@ -863,6 +878,51 @@ select {
 .alert-card strong {
   display: block;
   margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.alert-card small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.alert-rank-badge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  min-width: 46px;
+  height: 32px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #171717;
+  color: #fff;
+  border: 2px solid rgba(255,255,255,.9);
+  box-shadow: 0 5px 12px rgba(0,0,0,.16);
+  font-size: .86rem;
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: .01em;
+}
+
+.alert-rank-badge.rank-1 {
+  background: #b87900;
+}
+
+.alert-rank-badge.rank-2 {
+  background: #65717d;
+}
+
+.alert-rank-badge.rank-3 {
+  background: #9a541f;
+}
+
+@media (max-width: 760px) {
+  #alertList {
+    grid-template-columns: 1fr;
+  }
 }
 
 .add-panel {
@@ -4701,7 +4761,93 @@ body {
 
 /* Violation list PDF orientation chooser */
 .violation-orientation-card {
-  width: min(620px, 100%);
+  width: min(680px, 100%);
+}
+
+.violation-print-date-range {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1.5px solid var(--line);
+  border-radius: 18px;
+  background: var(--cream);
+}
+
+.violation-print-range-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.violation-print-range-heading h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+}
+
+.violation-print-range-heading p,
+.violation-print-range-note {
+  margin: 0;
+  color: #5c5130;
+  font-size: .86rem;
+  line-height: 1.4;
+  font-weight: 650;
+}
+
+.violation-print-clear-range {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 8px 13px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--black);
+  color: #fff;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.violation-print-clear-range:hover,
+.violation-print-clear-range:focus-visible {
+  transform: translateY(-1px);
+  outline: 3px solid rgba(255, 208, 0, .42);
+  outline-offset: 2px;
+}
+
+.violation-print-date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 13px;
+}
+
+.violation-print-date-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: .86rem;
+  font-weight: 850;
+}
+
+.violation-print-date-grid input {
+  width: 100%;
+  min-height: 44px;
+  border: 1.5px solid var(--line);
+  border-radius: 13px;
+  background: #fff;
+  padding: 9px 11px;
+  color: var(--black);
+  font: inherit;
+  font-weight: 750;
+}
+
+.violation-print-date-grid input:focus {
+  border-color: var(--yellow-dark, #d9a900);
+  outline: 3px solid rgba(255, 208, 0, .25);
+}
+
+.violation-print-range-note {
+  margin-top: 10px;
+  font-size: .78rem;
 }
 
 .orientation-choice-grid {
@@ -4765,6 +4911,16 @@ body {
 }
 
 @media (max-width: 560px) {
+  .violation-print-range-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .violation-print-clear-range {
+    align-self: flex-start;
+  }
+
+  .violation-print-date-grid,
   .orientation-choice-grid {
     grid-template-columns: 1fr;
   }
@@ -4830,5 +4986,33 @@ body {
       clamp(322px, 26vw, 472px)
       minmax(0, 1fr)
       clamp(322px, 25vw, 452px) !important;
+  }
+}
+
+/* --- Desktop compact action bar + three-column Alert Center --- */
+@media (min-width: 1100px) {
+  .admin-shortcuts {
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .admin-shortcuts button {
+    min-width: 0;
+    min-height: 50px;
+    padding: 11px 8px;
+    border-radius: 15px;
+    font-size: clamp(.72rem, .78vw, .86rem);
+    line-height: 1.15;
+    text-align: center;
+  }
+
+  #alertList {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 761px) and (max-width: 1099px) {
+  #alertList {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

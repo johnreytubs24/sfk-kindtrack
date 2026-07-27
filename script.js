@@ -246,6 +246,9 @@ const printAllBtn = document.getElementById("printAllBtn");
 const printViolationListBtn = document.getElementById("printViolationListBtn");
 const violationPrintOrientationModal = document.getElementById("violationPrintOrientationModal");
 const closeViolationPrintOrientationModal = document.getElementById("closeViolationPrintOrientationModal");
+const violationPrintFromDate = document.getElementById("violationPrintFromDate");
+const violationPrintToDate = document.getElementById("violationPrintToDate");
+const clearViolationPrintDateRange = document.getElementById("clearViolationPrintDateRange");
 const printViolationLandscapeBtn = document.getElementById("printViolationLandscapeBtn");
 const printViolationPortraitBtn = document.getElementById("printViolationPortraitBtn");
 const printAllOptionsModal = document.getElementById("printAllOptionsModal");
@@ -4307,17 +4310,20 @@ function renderAlertCenter() {
     return;
   }
 
-  alertedStudents.forEach(student => {
+  alertedStudents.forEach((student, index) => {
     const status = getStudentStatus(student);
     const alertDetails = getActiveAlertDetails(student);
     const missingText = alertDetails.missing.length
       ? `Needs: ${alertDetails.missing.join(", ")}`
       : "Ready for monitoring";
+    const rank = index + 1;
+    const rankClass = rank <= 3 ? ` rank-${rank}` : "";
 
     const div = document.createElement("div");
     div.className = `alert-card ${status.className}`;
 
     div.innerHTML = `
+      <span class="alert-rank-badge${rankClass}" title="Alert ranking #${rank}" aria-label="Alert ranking number ${rank}">#${rank}</span>
       <strong>${status.icon} ${student.name}</strong>
       <div>${status.label}</div>
       <small>${alertDetails.reason}</small>
@@ -6253,7 +6259,63 @@ function getViolationRegisterSettlementDetails(violation) {
   };
 }
 
-function getViolationRegisterRows() {
+function getViolationDateInterval(value) {
+  const normalized = formatDate(value || "");
+
+  if (/^\d{4}-\d{2}$/.test(normalized)) {
+    const [yearText, monthText] = normalized.split("-");
+    const year = Number(yearText);
+    const month = Number(monthText);
+
+    if (!year || month < 1 || month > 12) return null;
+
+    const lastDay = new Date(year, month, 0).getDate();
+    return {
+      start: `${yearText}-${monthText}-01`,
+      end: `${yearText}-${monthText}-${String(lastDay).padStart(2, "0")}`
+    };
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    return { start: normalized, end: normalized };
+  }
+
+  return null;
+}
+
+function getViolationPrintDateFilter() {
+  const start = String(violationPrintFromDate?.value || "").trim();
+  const end = String(violationPrintToDate?.value || "").trim();
+
+  if (start && end && start > end) {
+    showToast("The From date must be earlier than or the same as the To date.");
+    return { valid: false, start, end, label: "" };
+  }
+
+  let label = "All violation dates";
+  if (start && end) {
+    label = `${formatDisplayDate(start)} to ${formatDisplayDate(end)}`;
+  } else if (start) {
+    label = `From ${formatDisplayDate(start)}`;
+  } else if (end) {
+    label = `Up to ${formatDisplayDate(end)}`;
+  }
+
+  return { valid: true, start, end, label };
+}
+
+function violationMatchesPrintDateRange(value, start, end) {
+  if (!start && !end) return true;
+
+  const interval = getViolationDateInterval(value);
+  if (!interval) return false;
+
+  if (start && interval.end < start) return false;
+  if (end && interval.start > end) return false;
+  return true;
+}
+
+function getViolationRegisterRows(dateFilter = null) {
   const sortedStudents = [...students].sort((a, b) =>
     String(a.lastName || "").localeCompare(String(b.lastName || ""), undefined, { sensitivity: "base" }) ||
     String(a.firstName || "").localeCompare(String(b.firstName || ""), undefined, { sensitivity: "base" })
@@ -6268,6 +6330,13 @@ function getViolationRegisterRows() {
     );
 
     violations.forEach(violation => {
+      if (
+        dateFilter &&
+        !violationMatchesPrintDateRange(violation.date || "", dateFilter.start, dateFilter.end)
+      ) {
+        return;
+      }
+
       rows.push({
         studentId: String(student.id || student.name || ""),
         studentName: student.name || `${student.lastName || ""}, ${student.firstName || ""}`.trim(),
@@ -6299,13 +6368,22 @@ function closeViolationPrintOrientationOptions() {
 function printViolationListReport(orientation = "landscape") {
   const normalizedOrientation = orientation === "portrait" ? "portrait" : "landscape";
   const isPortrait = normalizedOrientation === "portrait";
-  closeViolationPrintOrientationOptions();
-  const rows = getViolationRegisterRows();
+  const dateFilter = getViolationPrintDateFilter();
+
+  if (!dateFilter.valid) return;
+
+  const rows = getViolationRegisterRows(dateFilter);
 
   if (!rows.length) {
-    showToast("No violation records available to print.");
+    showToast(
+      dateFilter.start || dateFilter.end
+        ? "No violation records found in the selected date range."
+        : "No violation records available to print."
+    );
     return;
   }
+
+  closeViolationPrintOrientationOptions();
 
   const reportRows = rows.map(row => {
     const details = getViolationRegisterSettlementDetails(row.violation);
@@ -6667,6 +6745,7 @@ function printViolationListReport(orientation = "landscape") {
   const reportRoot = reportDocument.getElementById("report-root");
   const maxRowsPerPage = printConfig.maxRowsPerPage;
   const termLabel = getTermLabel();
+  const dateRangeLabel = dateFilter.label;
 
   function makeCell(className = "") {
     const cell = reportDocument.createElement("td");
@@ -6702,6 +6781,7 @@ function printViolationListReport(orientation = "landscape") {
         <div>
           <h1>SFK KindTrack — Violation Settlement Monitoring List</h1>
           <p>Class/Section: Grade 8 – St. Faustina Kowalska &nbsp; | &nbsp; Term: ${escapeHTML(termLabel)}</p>
+          <p>Date Range: ${escapeHTML(dateRangeLabel)}</p>
         </div>
         <div class="page-meta">
           <strong class="page-number"></strong>
@@ -7708,6 +7788,14 @@ if (printViolationListBtn) {
 
 if (closeViolationPrintOrientationModal) {
   closeViolationPrintOrientationModal.addEventListener("click", closeViolationPrintOrientationOptions);
+}
+
+if (clearViolationPrintDateRange) {
+  clearViolationPrintDateRange.addEventListener("click", () => {
+    if (violationPrintFromDate) violationPrintFromDate.value = "";
+    if (violationPrintToDate) violationPrintToDate.value = "";
+    violationPrintFromDate?.focus();
+  });
 }
 
 if (printViolationLandscapeBtn) {
