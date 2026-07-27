@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sfk-kindtrack-portrait35-monthdate-v27';
+const CACHE_NAME = 'sfk-kindtrack-desktop-extra-075in-side-panels-v30';
 const APP_SHELL = [
   './',
   './index.html',

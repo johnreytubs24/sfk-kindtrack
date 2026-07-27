@@ -4773,3 +4773,62 @@ body {
     min-height: 170px;
   }
 }
+
+/* --- Desktop three-column student workspace ---
+   Student list | selected student record | kindness guide
+   This final override keeps the guide beside the record on desktop while
+   preserving the existing stacked/mobile layout at 900px and below. */
+@media (min-width: 901px) {
+  main {
+    grid-template-columns:
+      clamp(250px, 22vw, 400px)
+      minmax(0, 1fr)
+      clamp(250px, 21vw, 380px) !important;
+    align-items: start;
+    gap: 18px;
+  }
+
+  .student-panel {
+    grid-column: 1;
+  }
+
+  .details-panel {
+    grid-column: 2;
+  }
+
+  .fee-panel {
+    grid-column: 3;
+  }
+
+  .student-panel,
+  .details-panel,
+  .fee-panel {
+    position: sticky;
+    top: 14px;
+    max-height: calc(100dvh - 28px) !important;
+    min-width: 0;
+  }
+
+  .student-panel {
+    height: calc(100dvh - 28px);
+    overflow: hidden;
+  }
+
+  .details-panel,
+  .fee-panel {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+}
+
+/* --- Extra-wide side panels for large desktop screens ---
+   Adds about 0.75 inch (~72px at 96dpi) to both side panels without
+   forcing the wider sizing on smaller laptop widths. */
+@media (min-width: 1400px) {
+  main {
+    grid-template-columns:
+      clamp(322px, 26vw, 472px)
+      minmax(0, 1fr)
+      clamp(322px, 25vw, 452px) !important;
+  }
+}
