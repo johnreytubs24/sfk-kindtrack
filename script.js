@@ -198,6 +198,9 @@ const addKindnessStatus = document.getElementById("addKindnessStatus");
 const addKindnessCompletedDate = document.getElementById("addKindnessCompletedDate");
 const addAdvancedFields = document.getElementById("addAdvancedFields");
 const addDate = document.getElementById("addDate");
+const addMonth = document.getElementById("addMonth");
+const exactViolationDateBtn = document.getElementById("exactViolationDateBtn");
+const monthOnlyViolationDateBtn = document.getElementById("monthOnlyViolationDateBtn");
 const addNotes = document.getElementById("addNotes");
 const addMessage = document.getElementById("addMessage");
 
@@ -241,6 +244,10 @@ const confirmPrintBtn = document.getElementById("confirmPrintBtn");
 
 const printAllBtn = document.getElementById("printAllBtn");
 const printViolationListBtn = document.getElementById("printViolationListBtn");
+const violationPrintOrientationModal = document.getElementById("violationPrintOrientationModal");
+const closeViolationPrintOrientationModal = document.getElementById("closeViolationPrintOrientationModal");
+const printViolationLandscapeBtn = document.getElementById("printViolationLandscapeBtn");
+const printViolationPortraitBtn = document.getElementById("printViolationPortraitBtn");
 const printAllOptionsModal = document.getElementById("printAllOptionsModal");
 const printAllIncludeNoViolations = document.getElementById("printAllIncludeNoViolations");
 const printAllIncludeFees = document.getElementById("printAllIncludeFees");
@@ -533,6 +540,9 @@ function renderAttendanceSafely() {
 function formatDate(dateValue) {
   if (!dateValue) return "";
 
+  const text = String(dateValue).trim();
+  if (/^\d{4}-\d{2}$/.test(text)) return text;
+
   const date = new Date(dateValue);
   if (isNaN(date)) return dateValue;
 
@@ -651,6 +661,11 @@ function getMonthDayKey(dateValue) {
   if (!dateValue) return null;
 
   const textDate = String(dateValue).trim();
+  const monthOnlyMatch = textDate.match(/^(\d{4})-(\d{2})$/);
+  if (monthOnlyMatch) {
+    return Number(monthOnlyMatch[2]) * 100 + 1;
+  }
+
   const match = textDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
 
   if (match) {
@@ -1080,7 +1095,17 @@ function getCurrentMonthISO() {
 function formatDisplayDate(dateValue) {
   if (!dateValue) return "";
 
-  const date = new Date(`${dateValue}T00:00:00`);
+  const text = String(dateValue).trim();
+  const monthOnlyMatch = text.match(/^(\d{4})-(\d{2})$/);
+  if (monthOnlyMatch) {
+    const monthDate = new Date(Number(monthOnlyMatch[1]), Number(monthOnlyMatch[2]) - 1, 1);
+    return monthDate.toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric"
+    });
+  }
+
+  const date = new Date(`${text}T00:00:00`);
   if (isNaN(date)) return dateValue;
 
   return date.toLocaleDateString("en-US", {
@@ -4553,7 +4578,7 @@ function renderKindnessSettlementDetails() {
   const recordHTML = records.map(item => `
     <button type="button" class="kindness-settlement-item ${isKindnessPending(item.violation) ? "pending" : "completed"}" onclick="selectStudentFromAction('${escapeHTML(item.student.id)}')">
       <strong>${escapeHTML(item.student.name)}</strong>
-      <small>${escapeHTML(item.violation.date || "No date")} • ${escapeHTML(item.violation.type || "Violation")}</small>
+      <small>${escapeHTML(formatDisplayDate(item.violation.date) || item.violation.date || "No date")} • ${escapeHTML(item.violation.type || "Violation")}</small>
       <em>${escapeHTML(getEffectiveKindnessTask(item.violation) || "No task encoded yet")}</em>
       <span>Status: ${escapeHTML(getEffectiveKindnessStatus(item.violation))}${getEffectiveKindnessCompletedDate(item.violation) ? ` • Completed: ${escapeHTML(formatDisplayDate(getEffectiveKindnessCompletedDate(item.violation)))}` : ""}</span>
     </button>
@@ -5298,6 +5323,30 @@ function setGuideBulkMode(enabled) {
   }
 }
 
+function setAddViolationDateMode(mode = "exact") {
+  const monthOnly = mode === "month";
+
+  if (addDate) {
+    addDate.classList.toggle("hidden", monthOnly);
+    addDate.required = !monthOnly;
+    if (!addDate.value) addDate.value = getTodayISO();
+  }
+
+  if (addMonth) {
+    addMonth.classList.toggle("hidden", !monthOnly);
+    addMonth.required = monthOnly;
+    if (!addMonth.value) addMonth.value = getCurrentMonthISO();
+  }
+
+  if (exactViolationDateBtn) exactViolationDateBtn.classList.toggle("active", !monthOnly);
+  if (monthOnlyViolationDateBtn) monthOnlyViolationDateBtn.classList.toggle("active", monthOnly);
+}
+
+function getAddViolationDateValue() {
+  const monthOnly = addMonth && !addMonth.classList.contains("hidden");
+  return monthOnly ? addMonth.value : (addDate ? addDate.value : "");
+}
+
 function populateAddForm() {
   if (!addStudent || !addViolationType) return;
 
@@ -5326,9 +5375,9 @@ function populateAddForm() {
     `;
   });
 
-  if (addDate) {
-    addDate.value = new Date().toISOString().split("T")[0];
-  }
+  if (addDate) addDate.value = getTodayISO();
+  if (addMonth) addMonth.value = getCurrentMonthISO();
+  setAddViolationDateMode("exact");
 }
 
 function applyKindnessSuggestionFromSelectedViolation() {
@@ -5396,13 +5445,19 @@ async function saveViolation(event) {
     return;
   }
 
-  if (!addDate || !addDate.value) {
+  const selectedViolationDate = getAddViolationDateValue();
+  if (!selectedViolationDate) {
+    const monthOnly = addMonth && !addMonth.classList.contains("hidden");
+    const message = monthOnly
+      ? "Select the violation month and year."
+      : "Select the violation date.";
     if (addMessage) {
       addMessage.classList.remove("hidden");
-      addMessage.textContent = "Select the violation date.";
+      addMessage.textContent = message;
     }
-    showToast("Select the violation date.");
-    if (addDate) addDate.focus();
+    showToast(message);
+    const fieldToFocus = monthOnly ? addMonth : addDate;
+    if (fieldToFocus) fieldToFocus.focus();
     return;
   }
 
@@ -5419,7 +5474,8 @@ async function saveViolation(event) {
     kindnessTask: addKindnessTask ? addKindnessTask.value : "",
     kindnessStatus: addKindnessStatus ? addKindnessStatus.value : "Pending",
     kindnessCompletedDate: addKindnessCompletedDate ? addKindnessCompletedDate.value : "",
-    date: addDate.value,
+    date: selectedViolationDate,
+    datePrecision: selectedViolationDate.length === 7 ? "month" : "exact",
     notes: addNotes.value,
     encodedBy: "Sir JR"
   };
@@ -5537,7 +5593,11 @@ function editViolation(recordId) {
   if (editParentContacted) {
     editParentContacted.value = violation.parentContacted || "No";
   }
-  editDate.value = violation.date;
+  const violationDateValue = String(violation.date || "");
+  if (editDate) {
+    editDate.type = /^\d{4}-\d{2}$/.test(violationDateValue) ? "month" : "date";
+    editDate.value = violationDateValue;
+  }
   editNotes.value = violation.notes || "";
   if (isPaidWithKindnessStatus(editStatus ? editStatus.value : violation.status)) {
     applyPaidWithKindnessStatus(editStatus, editSettlementType, editViolationType, editKindnessTask, editKindnessStatus, editKindnessCompletedDate, null);
@@ -5784,7 +5844,7 @@ function buildPrintableStudentSection(student, options) {
 
   const rows = sortedViolations.map(v => `
     <tr>
-      <td>${v.date || ""}</td>
+      <td>${formatDisplayDate(v.date) || v.date || ""}</td>
       <td>${v.type || ""}</td>
       ${includeStatus ? `<td>${v.status || ""}</td>` : ""}
       ${includeFees ? `<td>${getFeeDisplay(v)}</td>` : ""}
@@ -6129,6 +6189,10 @@ function formatViolationRegisterDate(value) {
   const normalized = formatDate(value || "");
   if (!normalized) return "";
 
+  if (/^\d{4}-\d{2}$/.test(normalized)) {
+    return formatDisplayDate(normalized);
+  }
+
   const parts = normalized.split("-");
   if (parts.length === 3) {
     return `${parts[1]}/${parts[2]}/${parts[0]}`;
@@ -6224,7 +6288,18 @@ function buildViolationRegisterCheckbox(label, checked) {
   `;
 }
 
-function printViolationListReport() {
+function openViolationPrintOrientationOptions() {
+  openModal(violationPrintOrientationModal);
+}
+
+function closeViolationPrintOrientationOptions() {
+  closeModal(violationPrintOrientationModal);
+}
+
+function printViolationListReport(orientation = "landscape") {
+  const normalizedOrientation = orientation === "portrait" ? "portrait" : "landscape";
+  const isPortrait = normalizedOrientation === "portrait";
+  closeViolationPrintOrientationOptions();
   const rows = getViolationRegisterRows();
 
   if (!rows.length) {
@@ -6249,6 +6324,88 @@ function printViolationListReport() {
     };
   });
 
+  const printConfig = isPortrait
+    ? {
+        pageSize: "A4 portrait",
+        pageWidth: "210mm",
+        pageHeight: "297mm",
+        pagePadding: "4mm 5mm 6mm",
+        headerMinHeight: "11mm",
+        headerGap: "3mm",
+        headerMarginBottom: "1.3mm",
+        headerPaddingBottom: "1mm",
+        titleFontSize: "8.8pt",
+        subtitleFontSize: "5.1pt",
+        metaFontSize: "5pt",
+        headerCellHeight: "8mm",
+        headerFontSize: "4.1pt",
+        cellPadding: "0.3mm",
+        cellFontSize: "4.25pt",
+        cellLineHeight: "1.0",
+        rowHeight: "6.1mm",
+        checkboxSize: "2.2mm",
+        checkboxLargeSize: "2.8mm",
+        checkboxFontSize: "4.5pt",
+        signatureHeight: "2.8mm",
+        encodedFontSize: "3.7pt",
+        footerMinHeight: "2.6mm",
+        footerMarginTop: "0.7mm",
+        footerFontSize: "4pt",
+        maxRowsPerPage: 35,
+        recordLimitText: "Up to 35 violation records per page when they fit. A complete row moves to the next page when space is insufficient.",
+        columns: {
+          name: "28mm",
+          violation: "24mm",
+          date: "15mm",
+          type: "20mm",
+          payment: "29mm",
+          settlementDate: "29mm",
+          status: "14mm",
+          signature: "21mm",
+          encoded: "20mm"
+        }
+      }
+    : {
+        pageSize: "A4 landscape",
+        pageWidth: "297mm",
+        pageHeight: "210mm",
+        pagePadding: "8mm 8mm 10mm",
+        headerMinHeight: "18mm",
+        headerGap: "8mm",
+        headerMarginBottom: "3mm",
+        headerPaddingBottom: "2.2mm",
+        titleFontSize: "13pt",
+        subtitleFontSize: "7.5pt",
+        metaFontSize: "7pt",
+        headerCellHeight: "12mm",
+        headerFontSize: "6pt",
+        cellPadding: "0.9mm",
+        cellFontSize: "6.2pt",
+        cellLineHeight: "1.12",
+        rowHeight: "8.6mm",
+        checkboxSize: "3.2mm",
+        checkboxLargeSize: "4.2mm",
+        checkboxFontSize: "7pt",
+        signatureHeight: "4.8mm",
+        encodedFontSize: "5.5pt",
+        footerMinHeight: "4mm",
+        footerMarginTop: "2mm",
+        footerFontSize: "5.8pt",
+        maxRowsPerPage: 15,
+        recordLimitText: "Maximum of 15 violation records per page. A complete row moves to the next page when space is insufficient.",
+        columns: {
+          name: "35mm",
+          violation: "33mm",
+          date: "20mm",
+          type: "26mm",
+          payment: "44mm",
+          settlementDate: "40mm",
+          status: "18mm",
+          signature: "34mm",
+          encoded: "31mm"
+        }
+      };
+
   const printWindow = window.open("", "_blank");
 
   if (!printWindow) {
@@ -6264,7 +6421,7 @@ function printViolationListReport() {
         <title>SFK KindTrack Violation List</title>
         <style>
           @page {
-            size: A4 landscape;
+            size: ${printConfig.pageSize};
             margin: 0;
           }
 
@@ -6282,9 +6439,9 @@ function printViolationListReport() {
           }
 
           .report-page {
-            width: 297mm;
-            height: 210mm;
-            padding: 8mm 8mm 10mm;
+            width: ${printConfig.pageWidth};
+            height: ${printConfig.pageHeight};
+            padding: ${printConfig.pagePadding};
             display: flex;
             flex-direction: column;
             page-break-after: always;
@@ -6299,32 +6456,32 @@ function printViolationListReport() {
 
           .report-header {
             flex: 0 0 auto;
-            min-height: 18mm;
+            min-height: ${printConfig.headerMinHeight};
             display: flex;
             align-items: flex-start;
             justify-content: space-between;
-            gap: 8mm;
+            gap: ${printConfig.headerGap};
             border-bottom: 1.2mm solid #111;
-            margin-bottom: 3mm;
-            padding-bottom: 2.2mm;
+            margin-bottom: ${printConfig.headerMarginBottom};
+            padding-bottom: ${printConfig.headerPaddingBottom};
           }
 
           .report-header h1 {
             margin: 0 0 1.5mm;
-            font-size: 13pt;
+            font-size: ${printConfig.titleFontSize};
             line-height: 1.1;
           }
 
           .report-header p {
             margin: 0;
-            font-size: 7.5pt;
+            font-size: ${printConfig.subtitleFontSize};
           }
 
           .page-meta {
             min-width: 27mm;
             text-align: right;
-            font-size: 7pt;
-            line-height: 1.4;
+            font-size: ${printConfig.metaFontSize};
+            line-height: 1.3;
           }
 
           .page-meta strong,
@@ -6351,23 +6508,23 @@ function printViolationListReport() {
           th,
           td {
             border: 0.25mm solid #111;
-            padding: 0.9mm;
-            font-size: 6.2pt;
-            line-height: 1.12;
+            padding: ${printConfig.cellPadding};
+            font-size: ${printConfig.cellFontSize};
+            line-height: ${printConfig.cellLineHeight};
             vertical-align: middle;
             overflow-wrap: anywhere;
           }
 
           th {
-            height: 12mm;
+            height: ${printConfig.headerCellHeight};
             text-align: center;
-            font-size: 6pt;
+            font-size: ${printConfig.headerFontSize};
             font-weight: 700;
             background: #efefef;
           }
 
           tbody tr {
-            height: 8.6mm;
+            height: ${printConfig.rowHeight};
             page-break-inside: avoid;
             break-inside: avoid;
           }
@@ -6410,19 +6567,19 @@ function printViolationListReport() {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 3.2mm;
-            height: 3.2mm;
-            border: 0.3mm solid #111;
-            font-size: 7pt;
+            width: ${printConfig.checkboxSize};
+            height: ${printConfig.checkboxSize};
+            border: 0.25mm solid #111;
+            font-size: ${printConfig.checkboxFontSize};
             font-weight: 700;
             line-height: 1;
             flex: 0 0 auto;
           }
 
           .paper-check.large {
-            width: 4.2mm;
-            height: 4.2mm;
-            margin-top: 0.6mm;
+            width: ${printConfig.checkboxLargeSize};
+            height: ${printConfig.checkboxLargeSize};
+            margin-top: 0.45mm;
           }
 
           .paper-check.checked {
@@ -6432,14 +6589,14 @@ function printViolationListReport() {
           .signature-line {
             display: block;
             width: 94%;
-            height: 4.8mm;
+            height: ${printConfig.signatureHeight};
             margin: 0 auto;
             border-bottom: 0.25mm solid #111;
           }
 
           .encoded-question {
             display: block;
-            font-size: 5.5pt;
+            font-size: ${printConfig.encodedFontSize};
             line-height: 1.05;
           }
 
@@ -6453,25 +6610,25 @@ function printViolationListReport() {
 
           .report-footer {
             flex: 0 0 auto;
-            min-height: 4mm;
+            min-height: ${printConfig.footerMinHeight};
             display: flex;
             justify-content: space-between;
             align-items: flex-end;
             gap: 5mm;
-            margin-top: 2mm;
-            font-size: 5.8pt;
+            margin-top: ${printConfig.footerMarginTop};
+            font-size: ${printConfig.footerFontSize};
             color: #333;
           }
 
-          .col-name { width: 35mm; }
-          .col-violation { width: 33mm; }
-          .col-date { width: 20mm; }
-          .col-type { width: 26mm; }
-          .col-payment { width: 44mm; }
-          .col-settlement-date { width: 40mm; }
-          .col-status { width: 18mm; }
-          .col-signature { width: 34mm; }
-          .col-encoded { width: 31mm; }
+          .col-name { width: ${printConfig.columns.name}; }
+          .col-violation { width: ${printConfig.columns.violation}; }
+          .col-date { width: ${printConfig.columns.date}; }
+          .col-type { width: ${printConfig.columns.type}; }
+          .col-payment { width: ${printConfig.columns.payment}; }
+          .col-settlement-date { width: ${printConfig.columns.settlementDate}; }
+          .col-status { width: ${printConfig.columns.status}; }
+          .col-signature { width: ${printConfig.columns.signature}; }
+          .col-encoded { width: ${printConfig.columns.encoded}; }
 
           @media screen {
             body {
@@ -6496,7 +6653,7 @@ function printViolationListReport() {
           }
         </style>
       </head>
-      <body>
+      <body class="${normalizedOrientation}">
         <main id="report-root"></main>
       </body>
     </html>
@@ -6508,7 +6665,7 @@ function printViolationListReport() {
   // popup script, which can be blocked by the browser and leave an empty page.
   const reportDocument = printWindow.document;
   const reportRoot = reportDocument.getElementById("report-root");
-  const maxRowsPerPage = 15;
+  const maxRowsPerPage = printConfig.maxRowsPerPage;
   const termLabel = getTermLabel();
 
   function makeCell(className = "") {
@@ -6575,7 +6732,7 @@ function printViolationListReport() {
         </table>
       </div>
       <div class="report-footer">
-        <span>Maximum of 15 violation records per page. A complete row moves to the next page when space is insufficient.</span>
+        <span>${escapeHTML(printConfig.recordLimitText)}</span>
         <span>Generated through SFK KindTrack</span>
       </div>
     `;
@@ -6637,7 +6794,7 @@ function printViolationListReport() {
     const encodedCell = makeCell("center encoded-cell");
     const encodedQuestion = reportDocument.createElement("span");
     encodedQuestion.className = "encoded-question";
-    encodedQuestion.innerHTML = "Encoded in<br>Kindness App?";
+    encodedQuestion.innerHTML = isPortrait ? "Encoded?" : "Encoded in<br>Kindness App?";
     encodedCell.appendChild(encodedQuestion);
     appendCheckbox(encodedCell, "", item.encodedChecked, true);
     row.appendChild(encodedCell);
@@ -6773,7 +6930,7 @@ function printStudentRecord() {
 
   const rows = sortedViolations.map(v => `
     <tr>
-      <td>${v.date || ""}</td>
+      <td>${formatDisplayDate(v.date) || v.date || ""}</td>
       <td>${v.type || ""}</td>
       ${includeStatus ? `<td>${v.status || ""}</td>` : ""}
       ${includeFees ? `<td>${getFeeDisplay(v)}</td>` : ""}
@@ -7187,6 +7344,14 @@ if (addForm) {
   addForm.addEventListener("submit", saveViolation);
 }
 
+if (exactViolationDateBtn) {
+  exactViolationDateBtn.addEventListener("click", () => setAddViolationDateMode("exact"));
+}
+
+if (monthOnlyViolationDateBtn) {
+  monthOnlyViolationDateBtn.addEventListener("click", () => setAddViolationDateMode("month"));
+}
+
 if (bulkStudentSearch) {
   bulkStudentSearch.addEventListener("input", renderBulkStudentPicker);
 }
@@ -7356,7 +7521,7 @@ if (quickPrintAllBtn) {
 }
 
 if (quickPrintViolationListBtn) {
-  quickPrintViolationListBtn.addEventListener("click", printViolationListReport);
+  quickPrintViolationListBtn.addEventListener("click", openViolationPrintOrientationOptions);
 }
 
 if (openAttendanceModalBtn) {
@@ -7538,7 +7703,27 @@ if (printAllBtn) {
 }
 
 if (printViolationListBtn) {
-  printViolationListBtn.addEventListener("click", printViolationListReport);
+  printViolationListBtn.addEventListener("click", openViolationPrintOrientationOptions);
+}
+
+if (closeViolationPrintOrientationModal) {
+  closeViolationPrintOrientationModal.addEventListener("click", closeViolationPrintOrientationOptions);
+}
+
+if (printViolationLandscapeBtn) {
+  printViolationLandscapeBtn.addEventListener("click", () => printViolationListReport("landscape"));
+}
+
+if (printViolationPortraitBtn) {
+  printViolationPortraitBtn.addEventListener("click", () => printViolationListReport("portrait"));
+}
+
+if (violationPrintOrientationModal) {
+  violationPrintOrientationModal.addEventListener("click", event => {
+    if (event.target === violationPrintOrientationModal) {
+      closeViolationPrintOrientationOptions();
+    }
+  });
 }
 
 if (closePrintOptionsModal) {

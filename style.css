@@ -3392,6 +3392,62 @@ select {
   width: min(860px, 100%);
 }
 
+.violation-date-mode {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #f3f3f3;
+}
+
+.add-form .violation-date-mode button {
+  grid-column: auto;
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--black);
+  box-shadow: none;
+}
+
+.add-form .violation-date-mode button.active {
+  background: var(--black);
+  color: #fff;
+  border-color: var(--black);
+}
+
+.violation-date-field {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fffdf5;
+}
+
+.violation-date-heading strong,
+.violation-date-heading span {
+  display: block;
+}
+
+.violation-date-heading span {
+  margin-top: 3px;
+  color: var(--gray);
+  font-size: .78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.violation-date-field input {
+  width: 100%;
+}
+
 .bulk-student-picker {
   grid-column: 1 / -1;
   border: 1px solid var(--line);
@@ -4639,5 +4695,81 @@ body {
     font-size: .68rem !important;
     line-height: 1 !important;
     white-space: nowrap !important;
+  }
+}
+
+
+/* Violation list PDF orientation chooser */
+.violation-orientation-card {
+  width: min(620px, 100%);
+}
+
+.orientation-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.orientation-choice-card {
+  min-height: 220px;
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  background: var(--cream);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--black);
+  cursor: pointer;
+  transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+
+.orientation-choice-card:hover,
+.orientation-choice-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--yellow-dark, #d9a900);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .12);
+  outline: none;
+}
+
+.orientation-choice-card strong {
+  font-size: 1.08rem;
+}
+
+.orientation-choice-card small {
+  line-height: 1.45;
+  color: #555;
+  font-weight: 750;
+}
+
+.orientation-page-preview {
+  display: block;
+  background: #fff;
+  border: 2px solid #222;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 5px #f1f1f1;
+}
+
+.landscape-preview {
+  width: 112px;
+  height: 76px;
+}
+
+.portrait-preview {
+  width: 76px;
+  height: 112px;
+}
+
+@media (max-width: 560px) {
+  .orientation-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .orientation-choice-card {
+    min-height: 170px;
   }
 }

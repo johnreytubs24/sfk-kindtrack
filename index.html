@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="style.css?v=14" />
+  <link rel="stylesheet" href="style.css?v=16" />
 </head>
 <body>
 
@@ -452,7 +452,18 @@
         <option value="Other">Other</option>
       </select>
 
-      <input type="date" id="addDate" required />
+      <div class="violation-date-field">
+        <div class="violation-date-heading">
+          <strong>Violation Date</strong>
+          <span>Use month and year only when the exact date was not recorded.</span>
+        </div>
+        <div class="violation-date-mode" role="group" aria-label="Violation date detail">
+          <button type="button" id="exactViolationDateBtn" class="active">Exact Date</button>
+          <button type="button" id="monthOnlyViolationDateBtn">Month &amp; Year Only</button>
+        </div>
+        <input type="date" id="addDate" required />
+        <input type="month" id="addMonth" class="hidden" aria-label="Violation month and year" />
+      </div>
 
       <details class="advanced-fields" id="addAdvancedFields">
         <summary>Optional guidance details</summary>
@@ -547,7 +558,7 @@
       </button>
 
       <button id="printViolationListBtn" class="print-btn print-all-btn admin-only" type="button">
-        🧾 Print Violation List (A4 Landscape)
+        🧾 Print Violation List
       </button>
 
       <input
@@ -923,6 +934,32 @@
   </div>
 </div>
 
+<div class="modal hidden" id="violationPrintOrientationModal">
+  <div class="modal-card violation-orientation-card">
+    <div class="modal-title-row">
+      <div>
+        <h2>Violation List PDF</h2>
+        <p class="modal-subtitle">Choose the page orientation before printing.</p>
+      </div>
+      <button type="button" id="closeViolationPrintOrientationModal" class="modal-x">×</button>
+    </div>
+
+    <div class="orientation-choice-grid" role="group" aria-label="PDF page orientation">
+      <button type="button" id="printViolationLandscapeBtn" class="orientation-choice-card">
+        <span class="orientation-page-preview landscape-preview" aria-hidden="true"></span>
+        <strong>Landscape</strong>
+        <small>Current wide layout<br>Up to 15 records per page</small>
+      </button>
+
+      <button type="button" id="printViolationPortraitBtn" class="orientation-choice-card">
+        <span class="orientation-page-preview portrait-preview" aria-hidden="true"></span>
+        <strong>Portrait</strong>
+        <small>Compact vertical layout<br>Up to about 35 records per page</small>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div class="modal hidden" id="printOptionsModal">
   <div class="modal-card">
     <h2>Print Student Record</h2>
@@ -1043,7 +1080,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="firebase-auth-optional.js?v=12"></script>
-<script src="firebase-adapter.js?v=14"></script>
-<script src="script.js?v=20"></script>
+<script src="firebase-adapter.js?v=15"></script>
+<script src="script.js?v=23"></script>
 </body>
 </html>
